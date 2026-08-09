@@ -1,0 +1,16 @@
+[Unit]
+Description=Trividia TRUE METRIX daemon: device-assignment HTTP API
+After=network.target
+
+[Service]
+Type=simple
+User=trividia-truemetrix-daemon
+Group=trividia-truemetrix-daemon
+ExecStart=/usr/bin/trividia-truemetrix-api --config /etc/trividia-truemetrix-daemon/config.ini
+Restart=on-failure
+RestartSec=5
+StateDirectory=trividia-truemetrix-daemon
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

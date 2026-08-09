@@ -1,0 +1,84 @@
+[daemon]
+# DEBUG, INFO, WARNING, or ERROR.
+log_level = INFO
+
+# How often to check for a newly-docked meter.
+poll_interval_seconds = 5
+
+[storage]
+# Path to the SQLite database file.
+db_path = /var/lib/trividia-truemetrix-daemon/readings.db
+
+# One [profile.<name>] section per person/meter. The <name> in the section
+# header (e.g. "Alice" below) is the id used for matching, action-button
+# labels, and ?profile= -- keep it short. "name" is a separate, optional
+# full display name (defaults to the section id if left blank), not used
+# for matching. Each device_id comes from a synced meter's
+# Trividia-<model_code>-<serial> identifier -- run with --check-config, or
+# check trividia-truemetrix-find-unassigned, to see device_ids seen but not
+# yet claimed here. "notes" is free text for your own reference.
+#
+# sliding_scale is an optional insulin dosing table (see the Reports
+# section of the README) -- IMPORTANT: that value must come from the
+# person's own doctor; this daemon never invents or validates one. It's
+# entirely optional -- Bob below has none, since he's diet-controlled.
+#
+# [profile.Alice]
+# name = Alice Smith
+# email = alice@example.com
+# device_ids = Trividia-BLU-12345678
+# notes = Type 1, uses Humalog
+# sliding_scale =
+#     :70:0:Below range -- treat hypoglycemia first, do not dose
+#     71:150:0
+#     151:200:2
+#     201:250:4
+#     251:300:6
+#     301::8:Above range -- call doctor
+#
+# [profile.Bob]
+# name = Bob Jones
+# email = bob@example.com
+# notes = Type 2, diet-controlled
+# # Bob replaced his meter once -- both the old and new device_id are honored.
+# device_ids = Trividia-BLU-87654321, Trividia-MR2-11223344
+
+# New-device onboarding: when a meter with an unrecognized device_id syncs
+# for the first time, an interactive assignment prompt (ntfy or dunstify --
+# see below) and an unconditional admin notification both fire once, then
+# go silent for that device_id. trividia-truemetrix-find-unassigned remains
+# the durable fallback for anything missed by both.
+[onboarding]
+enabled = no
+
+# ntfy topic URL to publish the assignment prompt to. Requires [api]
+# enabled = yes, since the action buttons call back into this daemon's API;
+# without it, a local dunstify prompt is used instead (needs a real
+# desktop/D-Bus session -- won't reach anywhere from a headless service).
+ntfy_url =
+ntfy_token =
+
+# Where the API is reachable, for ntfy's action buttons to call back into.
+# Only used when [api] is enabled.
+api_base_url = http://127.0.0.1:8080
+
+# Seconds to wait for a dunstify response before giving up. Only used
+# when [api] is disabled.
+dunstify_timeout_seconds = 30
+
+# Comma-separated Apprise service URLs (https://github.com/caronc/apprise)
+# for the unconditional admin heads-up. Include a mailto:// URL here for
+# email -- there's no separate SMTP-only config, Apprise covers it.
+admin_apprise_urls =
+
+state_path = /var/lib/trividia-truemetrix-daemon/onboarding-state.json
+assignments_path = /var/lib/trividia-truemetrix-daemon/device-assignments.json
+
+# Local HTTP API: only used for ntfy's assignment-prompt callback right
+# now (no /latest or /report yet). Not needed if onboarding.enabled = no,
+# or if you're fine with the dunstify-only prompt path.
+[api]
+enabled = no
+host = 127.0.0.1
+port = 8080
+token =

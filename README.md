@@ -1,0 +1,349 @@
+# trividia-truemetrix-daemon
+
+A standalone Linux daemon that syncs a Trividia Health TRUE METRIX blood
+glucose meter's stored readings to a local SQLite database over USB HID. No
+cloud account, no companion app, no Tidepool account required.
+
+It's a thin wrapper around the
+[`trividia-truemetrix-hid`](https://github.com/bonelifer/trividia-truemetrix-hid)
+library, packaged to run unattended as a `systemd` service.
+
+**Disclaimer: This is an unofficial, community-developed project. It is not
+affiliated with, officially maintained by, or in any way officially
+connected with Trividia Health or Tidepool. This is a personal-use tool for
+reading data from your own meter(s), not a medical product. TRUE METRIX is
+a fingerstick meter, not a continuous glucose monitor -- this daemon only
+learns about a reading once the meter is physically docked and synced,
+never in real time. Don't rely on it for real-time hypo/hyperglycemia
+alerting; read your meter's own display for that. The optional sliding-scale
+dosing display (see [Reports](#reports)) only looks up a table you
+configure yourself -- it must come from the person's own doctor, and this
+tool does not generate, validate, or recommend doses.**
+
+## Supported meters
+
+Whatever [`trividia-truemetrix-hid`](https://github.com/bonelifer/trividia-truemetrix-hid)
+supports: TRUE METRIX, TRUE METRIX GO, and TRUE METRIX AIR. Only TRUE
+METRIX AIR has real-hardware testing at time of writing -- see that
+library's README for the current verification status.
+
+## Features
+
+- Polls for a docked meter over USB HID and syncs its stored readings to a
+  local SQLite database, deduplicated so re-docking the same meter is
+  always safe (the meter returns its *entire* history every sync, not just
+  new readings -- see [Database schema](#database-schema)).
+- **Multi-meter, per-person attribution.** Unlike a shared BLE scale, each
+  meter has its own serial number, so `[profile.<name>]` sections bind a
+  person to their own meter(s) by `device_id` -- no runtime "who was this?"
+  tagging needed once configured.
+- **New-device onboarding.** The first time an unrecognized meter syncs, an
+  interactive assignment prompt (ntfy with one action button per profile,
+  or a local `dunstify` prompt) and an unconditional admin notification
+  (via [Apprise](https://github.com/caronc/apprise)) both fire once, then
+  go quiet for that device -- see [Onboarding](#onboarding-new-devices).
+- `trividia-truemetrix-find-unassigned` lists any device_id with stored
+  readings but no profile, as a durable fallback for anything the live
+  notifications missed.
+- Runs as a `systemd` service with automatic restart on failure.
+- `trividia-truemetrix-report` generates a PDF or CSV table (or line chart)
+  of readings -- see [Reports](#reports).
+
+### Not yet implemented
+
+Deliberately deferred, in no particular order: threshold-based alerting
+(high/low glucose, staleness), a full read-only HTTP API (`/latest`,
+`/report` on demand), MQTT publishing, data pruning, and a Docker image --
+all of which `etekcity-scale-daemon` already has and this could eventually
+mirror. Open an issue/discussion if you want one prioritized.
+
+## Requirements
+
+Requires Python 3.11+, and everything
+[`trividia-truemetrix-hid`](https://github.com/bonelifer/trividia-truemetrix-hid#requirements)
+does: the `hidapi` system library, and (on Linux) a udev rule for non-root
+USB HID access. The daemon runs as its own system user in the `plugdev`
+group, so use `GROUP="plugdev"` rather than the library README's
+simpler `MODE="0666"` example:
+
+```
+# /etc/udev/rules.d/99-truemetrix.rules
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1f41", GROUP="plugdev", MODE="0660"
+```
+
+```bash
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+## Installation
+
+```bash
+git clone https://github.com/bonelifer/trividia-truemetrix-daemon.git
+cd trividia-truemetrix-daemon
+sudo ./install.sh
+```
+
+This creates a venv at `/opt/trividia-truemetrix-daemon`, installs the
+package (pulling in `trividia-truemetrix-hid` from GitHub), seeds
+`/etc/trividia-truemetrix-daemon/config.ini` (if it doesn't already exist),
+creates a `trividia-truemetrix-daemon` system user in the `plugdev` group,
+and installs and enables the systemd service. It also installs (but does
+not enable) the device-assignment API unit. Safe to re-run. Edit the config
+and `sudo systemctl restart trividia-truemetrix-daemon` afterward.
+
+### Config file
+
+Copy the example config and edit it:
+
+```bash
+sudo mkdir -p /etc/trividia-truemetrix-daemon
+sudo cp config/trividia-truemetrix-daemon.ini.example /etc/trividia-truemetrix-daemon/config.ini
+sudo "$EDITOR" /etc/trividia-truemetrix-daemon/config.ini
+```
+
+
+| Section | Key | Description |
+|---|---|---|
+| `daemon` | `log_level` | `DEBUG`, `INFO`, `WARNING`, or `ERROR`. |
+| `daemon` | `poll_interval_seconds` | How often to check for a newly-docked meter. Default `5`. |
+| `storage` | `db_path` | Path to the SQLite database file. |
+| `profile.<name>` | `device_ids` | Comma-separated `device_id`s (e.g. `Trividia-BLU-12345678`) this person's meter(s) report as. Required; each device_id may belong to only one profile -- a config with two profiles claiming the same one fails to load. |
+| `profile.<name>` | `name` | Optional full display name (e.g. `Alice Smith`). Defaults to the section id (`<name>` in `[profile.<name>]`) if left blank. The section id itself -- not this field -- is what's used for matching, action-button labels, and `?profile=`. |
+| `profile.<name>` | `email` | Optional, unused for now (no report header uses it yet). |
+| `profile.<name>` | `notes` | Optional free-text note (e.g. diagnosis, insulin type). Not shown in reports; for your own reference in the config file. |
+| `profile.<name>` | `sliding_scale` | Optional dosing table, one band per line: `low:high:dose[:label]` (`low`/`high` blank = unbounded on that side). See [Reports](#reports) -- **this must come from the person's own doctor; this tool never invents, validates, or adjusts these numbers.** Overlapping bands are rejected at load (an ambiguous table is a safety issue). |
+| `onboarding` | `enabled` | Fire the new-device onboarding notification: `yes` or `no`. Defaults to `no`. |
+| `onboarding` | `ntfy_url` / `ntfy_token` | ntfy topic for the interactive assignment prompt. Requires `[api] enabled = yes`. |
+| `onboarding` | `api_base_url` | Where the API is reachable, for ntfy's action buttons to call back into. Only used when `[api]` is enabled. |
+| `onboarding` | `dunstify_timeout_seconds` | Seconds to wait for a dunstify response. Only used when `[api]` is disabled. |
+| `onboarding` | `admin_apprise_urls` | Comma-separated Apprise URLs for the unconditional admin heads-up (include a `mailto://` URL for email). |
+| `onboarding` | `state_path` | Where "already prompted" state is tracked (once per device_id, ever). |
+| `onboarding` | `assignments_path` | Where dynamic (button-tap) device_id -> profile assignments are stored, separate from the static config. |
+| `api` | `enabled` | Run the local HTTP API: `yes` or `no`. Only needed for the ntfy callback. |
+| `api` | `host` / `port` / `token` | Bind address/port, and an optional bearer token required on `/assign-device`. |
+| `report` | `unit` | `mg_dl` or `mmol_l`. Defaults to `mg_dl` (what the meter itself always reports). |
+| `report` | `date_format` | `us` (MM/DD/YYYY, 12-hour) or `world` (DD/MM/YYYY, 24-hour). |
+| `report` | `layout` | `full` (one row per reading), `simple` (date/glucose only, side-by-side columns), or `chart` (a line chart of glucose over time). PDF only. |
+| `report` | `page_size` | `letter` or `a4`. PDF only. |
+| `report` | `include_device_id` / `include_model` / `include_profile` | Show these columns in the `full` layout: `yes` or `no`. `include_profile` needs `--config` (profile membership isn't in the database). |
+| `report` | `include_summary` | Print a min/max/average/high-count/low-count summary line below the title: `yes` or `no`. PDF only. |
+| `report` | `include_sliding_scale` | Show Dose/Note columns, looked up per reading from a profile's `sliding_scale`: `yes` or `no`. Requires `--profile` (or resolves per section with `--multi-meter`) -- see [Reports](#reports) and its disclaimer. |
+
+### systemd service
+
+```bash
+sudo useradd --system --no-create-home --user-group --groups plugdev trividia-truemetrix-daemon
+sudo cp systemd/trividia-truemetrix-daemon.service /etc/systemd/system/
+sudo ln -sf /opt/trividia-truemetrix-daemon/venv/bin/trividia-truemetrix-daemon /usr/bin/trividia-truemetrix-daemon
+sudo ln -sf /opt/trividia-truemetrix-daemon/venv/bin/trividia-truemetrix-api /usr/bin/trividia-truemetrix-api
+sudo ln -sf /opt/trividia-truemetrix-daemon/venv/bin/trividia-truemetrix-find-unassigned /usr/bin/trividia-truemetrix-find-unassigned
+sudo ln -sf /opt/trividia-truemetrix-daemon/venv/bin/trividia-truemetrix-report /usr/bin/trividia-truemetrix-report
+sudo systemctl daemon-reload
+sudo systemctl enable --now trividia-truemetrix-daemon
+```
+
+Watch it with:
+
+```bash
+sudo journalctl -u trividia-truemetrix-daemon -f
+```
+
+## Onboarding new devices
+
+When a meter with a `device_id` not claimed by any `[profile.<name>]`
+syncs for the first time:
+
+1. Its readings are still stored (never dropped) under the raw device_id.
+2. An interactive assignment prompt fires: ntfy with one action button per
+   configured profile (if `[api] enabled = yes`), or a local `dunstify`
+   prompt otherwise -- tapping either binds that device_id to the chosen
+   profile going forward, written to `onboarding.assignments_path`.
+3. **Unconditionally**, alongside step 2, an admin notification fires via
+   every URL in `onboarding.admin_apprise_urls` -- so an admin is informed
+   even if the interactive prompt is missed or ignored.
+4. Both fire once per device_id, ever (tracked in `onboarding.state_path`).
+   There's no repeat nagging -- run `trividia-truemetrix-find-unassigned`
+   any time to reconcile anything missed by both channels.
+
+Enable it:
+
+```ini
+[onboarding]
+enabled = yes
+admin_apprise_urls = mailto://user:pass@gmail.com
+
+[api]
+enabled = yes
+```
+
+```bash
+sudo cp systemd/trividia-truemetrix-api.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now trividia-truemetrix-api.service
+```
+
+Manually assign (or correct) a device without waiting for a notification:
+
+```bash
+curl "http://127.0.0.1:8080/assign-device?device_id=Trividia-BLU-12345678&profile=Alice"
+```
+
+### Finding unassigned devices
+
+```bash
+trividia-truemetrix-find-unassigned --config /etc/trividia-truemetrix-daemon/config.ini
+```
+
+## Manual usage
+
+```bash
+trividia-truemetrix-daemon --config /etc/trividia-truemetrix-daemon/config.ini
+trividia-truemetrix-daemon --config /etc/trividia-truemetrix-daemon/config.ini --verbose
+```
+
+Validate a config file without starting the daemon:
+
+```bash
+trividia-truemetrix-daemon --config /etc/trividia-truemetrix-daemon/config.ini --check-config
+```
+
+### On-demand capture instead of a long-running service
+
+`--once` polls until one meter syncs (or `--once-timeout` seconds elapse)
+and exits, instead of running until stopped:
+
+```bash
+trividia-truemetrix-daemon --config /etc/trividia-truemetrix-daemon/config.ini --once --once-timeout 30
+```
+
+## Reports
+
+`trividia-truemetrix-report` reads the database and writes a table (or
+chart) of readings to a PDF or CSV file. **The realistic case is one
+person's report, via `--profile`** -- that's what you'd actually hand to a
+doctor. Multi-meter/household reports (below) are a secondary convenience,
+not the primary use case:
+
+```bash
+# One person's readings -- the report that actually matters
+trividia-truemetrix-report --config /etc/trividia-truemetrix-daemon/config.ini --profile Alice --output alice-report.pdf
+
+# Preset ranges: 7d, 30d, 90d, 1y, all (default: all)
+trividia-truemetrix-report --config /etc/trividia-truemetrix-daemon/config.ini --profile Alice --period 30d --output last-30-days.pdf
+
+# Explicit date range (--to defaults to now if omitted)
+trividia-truemetrix-report --config /etc/trividia-truemetrix-daemon/config.ini --profile Alice --from 2026-01-01 --to 2026-03-31 --output q1.pdf
+
+# Point directly at a database file instead of a config
+trividia-truemetrix-report --db /var/lib/trividia-truemetrix-daemon/readings.db --device-id Trividia-BLU-12345678 --output report.pdf
+
+# CSV instead of PDF
+trividia-truemetrix-report --config /etc/trividia-truemetrix-daemon/config.ini --profile Alice --format csv --output report.csv
+
+# Every reading on record, ignoring who owns which meter (rarely what you want)
+trividia-truemetrix-report --config /etc/trividia-truemetrix-daemon/config.ini --output everything.pdf
+```
+
+Add `--device-id Trividia-BLU-12345678` to restrict the report to one
+meter directly (e.g. without `--config`/profiles set up). If the database
+has readings from more than one meter and you actually want a combined
+household view, `--multi-meter` gives one PDF with a separate section
+(its own table/chart and summary line) per meter, each starting on a fresh
+page, rather than mixing every meter's readings into one table:
+
+```bash
+trividia-truemetrix-report --config /etc/trividia-truemetrix-daemon/config.ini --multi-meter --output all-meters.pdf
+```
+
+`--multi-meter` is mutually exclusive with `--device-id` and only affects
+PDF output (`--format csv` ignores it, since the CSV's Device ID column
+already differentiates meters in one flat file). `--profile` requires
+`--config`, since profile membership lives in the config file, not the
+database -- readings are matched to a profile by resolving each row's
+`device_id` the same way the daemon itself does (static `[profile.<name>]`
+config, falling back to dynamic onboarding assignments).
+
+The layout, which columns appear, the unit, and the date/time format are
+controlled by the `[report]` section of the config file (see the config
+table above). `--db` always uses the defaults (`full` layout, mg/dL,
+world date format, every optional column).
+
+### Sliding scale (insulin dosing)
+
+Set `report.include_sliding_scale = yes` and a profile's own
+`[profile.<name>] sliding_scale` (see the config table above) for Dose and
+Note columns, looked up per reading from that profile's bands:
+
+```bash
+trividia-truemetrix-report --config /etc/trividia-truemetrix-daemon/config.ini --profile Alice --output alice.pdf
+```
+
+> [!IMPORTANT]
+> **This is a display lookup of a dosing table you already have, not
+> medical advice, and not something this tool generates, validates, or
+> recommends.** Populate `sliding_scale` with exactly what the person's own
+> doctor prescribed for them -- sliding scales vary by insulin type,
+> individual sensitivity, and treatment plan, and a table copied from
+> somewhere generic (or from a different person) could be actively unsafe.
+> A reading that falls outside every configured band shows "no guidance
+> configured" rather than a guessed value. Overlapping bands are rejected
+> at config load time, since an ambiguous table -- two bands both claiming
+> to cover the same reading -- is a safety issue, not just a config nit.
+
+With `--multi-meter`, each meter's section resolves its own profile's
+sliding scale independently (see
+[combined-multi-meter-sliding-scale.pdf](samples/combined-multi-meter-sliding-scale.pdf)):
+a profile with no `sliding_scale` configured just shows no Dose/Note
+columns for its section, with no fallback to another profile's table.
+
+See [samples/](samples/) for a rendered PDF of every layout/unit/date-format
+combination (all single-profile, the realistic case), plus the sliding-scale
+examples and the secondary household/combined samples.
+
+## Database schema
+
+Each reading is inserted as one row into the `readings` table:
+
+| Column | Type | Notes |
+|---|---|---|
+| `device_id` | TEXT | `Trividia-<model_code>-<serial>`, from the meter itself |
+| `model` | TEXT | Full model name, e.g. `TRUE METRIX AIR` |
+| `device_time` | TEXT | ISO-8601, decoded from the meter's own clock (not timezone-aware) |
+| `value_mg_dl` | INTEGER | Blood glucose, mg/dL |
+| `out_of_range` | TEXT | `high`, `low`, or NULL |
+| `is_control_solution` | INTEGER | 1 if flagged as a control-solution test rather than a real reading |
+| `raw` | TEXT | Undecoded record, used with `device_id` as the dedup key |
+| `synced_at` | TEXT | ISO-8601 UTC, when this daemon inserted the row |
+
+`UNIQUE(device_id, raw)` makes re-syncing a meter idempotent: the meter
+always returns its *entire* on-device history on every `GET_RESULTS`, not
+just readings added since the last sync, so without this constraint every
+dock would re-insert the meter's whole history as duplicates.
+
+Query it directly with `sqlite3`, or point any BI/graphing tool at the file.
+
+## Acknowledgments
+
+- Meter hardware designed and sold by [Trividia Health](https://www.trividiahealth.com)
+  (see the Disclaimer above).
+- Built on [`trividia-truemetrix-hid`](https://github.com/bonelifer/trividia-truemetrix-hid),
+  which does the USB HID protocol work, itself ported from Tidepool's
+  open-source uploader driver.
+- Daemon structure (config/storage/systemd/install.sh conventions, and the
+  ntfy/dunstify notification pattern) follows
+  [`etekcity-scale-daemon`](https://github.com/bonelifer/etekcity-scale-daemon).
+- Code review, implementation, and documentation assisted by [Claude](https://www.anthropic.com/claude).
+
+## Contributing
+
+Contributions are welcome!
+
+- **Bug reports**: [Open an issue](https://github.com/bonelifer/trividia-truemetrix-daemon/issues).
+- **Everything else** (questions, feature requests, ideas, general discussion): [Use Discussions](https://github.com/bonelifer/trividia-truemetrix-daemon/discussions).
+- Pull requests are welcome for bug fixes or discussed features.
+
+## License
+
+This project is licensed under the **GNU General Public License v3.0**.
+
+See [LICENSE](LICENSE) for more information.

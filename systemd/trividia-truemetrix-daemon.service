@@ -1,0 +1,16 @@
+[Unit]
+Description=Trividia TRUE METRIX USB HID glucose meter sync daemon
+
+[Service]
+Type=simple
+User=trividia-truemetrix-daemon
+Group=trividia-truemetrix-daemon
+SupplementaryGroups=plugdev
+ExecStart=/usr/bin/trividia-truemetrix-daemon --config /etc/trividia-truemetrix-daemon/config.ini
+Restart=on-failure
+RestartSec=5
+StateDirectory=trividia-truemetrix-daemon
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target
