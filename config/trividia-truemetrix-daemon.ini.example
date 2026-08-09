@@ -23,11 +23,19 @@ db_path = /var/lib/trividia-truemetrix-daemon/readings.db
 # person's own doctor; this daemon never invents or validates one. It's
 # entirely optional -- Bob below has none, since he's diet-controlled.
 #
+# high_threshold_mg_dl/low_threshold_mg_dl override [alerting]'s global
+# thresholds (see below) for this profile's meter(s) specifically -- blank
+# means "use the global default". Target ranges vary by treatment plan, so
+# unlike [alerting]'s single shared value, per-profile overrides matter
+# once more than one person's readings land in the same database.
+#
 # [profile.Alice]
 # name = Alice Smith
 # email = alice@example.com
 # device_ids = Trividia-BLU-12345678
 # notes = Type 1, uses Humalog
+# high_threshold_mg_dl = 250
+# low_threshold_mg_dl = 70
 # sliding_scale =
 #     :70:0:Below range -- treat hypoglycemia first, do not dose
 #     71:150:0
@@ -42,6 +50,31 @@ db_path = /var/lib/trividia-truemetrix-daemon/readings.db
 # notes = Type 2, diet-controlled
 # # Bob replaced his meter once -- both the old and new device_id are honored.
 # device_ids = Trividia-BLU-87654321, Trividia-MR2-11223344
+# # No threshold overrides -- Bob uses [alerting]'s global defaults below.
+
+# Threshold/staleness alerting, checked periodically (e.g. by the bundled
+# systemd timer, hourly by default) rather than by the daemon itself. A
+# high/low alert fires once per newly-arrived reading that crosses the
+# threshold; a staleness alert repeats at most once per day while it
+# persists. See a profile's own high_threshold_mg_dl/low_threshold_mg_dl
+# above to override these per person.
+[alerting]
+enabled = no
+
+# Comma-separated Apprise service URLs (https://github.com/caronc/apprise).
+# Required if enabled = yes.
+apprise_urls =
+
+# mg/dL. 0 disables that check. These are practical clinical thresholds
+# you set, not the meter's own fixed HI (>600)/LO (<20) display flags.
+high_threshold_mg_dl = 0
+low_threshold_mg_dl = 0
+
+# Alert if a meter hasn't produced a reading in over this many days. 0
+# disables the check.
+stale_after_days = 0
+
+state_path = /var/lib/trividia-truemetrix-daemon/alert-state.json
 
 # New-device onboarding: when a meter with an unrecognized device_id syncs
 # for the first time, an interactive assignment prompt (ntfy or dunstify --

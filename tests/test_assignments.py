@@ -29,7 +29,7 @@ def test_resolve_profile_prefers_static_over_dynamic(tmp_path):
         profiles={
             "Alice": ProfileConfig(
                 full_name="Alice Smith", email="", notes="", device_ids=("dev-1",),
-                sliding_scale=(),
+                sliding_scale=(), high_threshold_mg_dl=None, low_threshold_mg_dl=None,
             )
         }
     )

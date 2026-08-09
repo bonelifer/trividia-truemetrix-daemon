@@ -35,6 +35,8 @@ ln -sf "${INSTALL_DIR}/venv/bin/trividia-truemetrix-api" /usr/bin/trividia-truem
 ln -sf "${INSTALL_DIR}/venv/bin/trividia-truemetrix-find-unassigned" \
     /usr/bin/trividia-truemetrix-find-unassigned
 ln -sf "${INSTALL_DIR}/venv/bin/trividia-truemetrix-report" /usr/bin/trividia-truemetrix-report
+ln -sf "${INSTALL_DIR}/venv/bin/trividia-truemetrix-alert-check" \
+    /usr/bin/trividia-truemetrix-alert-check
 
 echo "==> Seeding config"
 mkdir -p "${CONFIG_DIR}"
@@ -55,11 +57,14 @@ fi
 echo "==> Installing systemd units"
 cp "${REPO_DIR}/systemd/trividia-truemetrix-daemon.service" /etc/systemd/system/
 cp "${REPO_DIR}/systemd/trividia-truemetrix-api.service" /etc/systemd/system/
+cp "${REPO_DIR}/systemd/trividia-truemetrix-alert-check.service" /etc/systemd/system/
+cp "${REPO_DIR}/systemd/trividia-truemetrix-alert-check.timer" /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now trividia-truemetrix-daemon
 
 echo "==> Done. Edit ${CONFIG_DIR}/config.ini if you haven't, then watch sync with:"
 echo "        journalctl -u trividia-truemetrix-daemon -f"
-echo "==> The device-assignment API is installed but not enabled (opt-in, only needed"
-echo "    for the ntfy assignment-prompt path). To turn it on:"
+echo "==> The device-assignment API and alert-check timer are installed but not enabled"
+echo "    (opt-in). To turn them on:"
 echo "        sudo systemctl enable --now trividia-truemetrix-api.service"
+echo "        sudo systemctl enable --now trividia-truemetrix-alert-check.timer"

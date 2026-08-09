@@ -4,6 +4,7 @@ import pytest
 
 from trividia_truemetrix_daemon.config import (
     ConfigError,
+    load_alert_config,
     load_api_config,
     load_config,
     load_onboarding_config,
@@ -111,6 +112,35 @@ def test_load_profiles_config_defaults_notes_and_sliding_scale_empty(tmp_path):
     assert alice.sliding_scale == ()
 
 
+def test_load_profiles_config_defaults_thresholds_to_none(tmp_path):
+    path = _write(tmp_path, "[profile.Alice]\ndevice_ids = Trividia-BLU-11111111\n")
+    alice = load_profiles_config(path).profiles["Alice"]
+    assert alice.high_threshold_mg_dl is None
+    assert alice.low_threshold_mg_dl is None
+
+
+def test_load_profiles_config_parses_threshold_overrides(tmp_path):
+    path = _write(
+        tmp_path,
+        "[profile.Alice]\n"
+        "device_ids = Trividia-BLU-11111111\n"
+        "high_threshold_mg_dl = 200\n"
+        "low_threshold_mg_dl = 70\n",
+    )
+    alice = load_profiles_config(path).profiles["Alice"]
+    assert alice.high_threshold_mg_dl == 200
+    assert alice.low_threshold_mg_dl == 70
+
+
+def test_load_profiles_config_rejects_non_integer_threshold(tmp_path):
+    path = _write(
+        tmp_path,
+        "[profile.Alice]\ndevice_ids = Trividia-BLU-11111111\nhigh_threshold_mg_dl = abc\n",
+    )
+    with pytest.raises(ConfigError, match="high_threshold_mg_dl"):
+        load_profiles_config(path)
+
+
 def test_load_profiles_config_propagates_sliding_scale_errors(tmp_path):
     path = _write(
         tmp_path,
@@ -175,3 +205,48 @@ def test_load_api_config_rejects_bad_port(tmp_path):
     path = _write(tmp_path, "[api]\nenabled = yes\nport = not-a-number\n")
     with pytest.raises(ConfigError, match="port"):
         load_api_config(path)
+
+
+def test_load_alert_config_defaults_to_disabled(tmp_path):
+    path = _write(tmp_path, "[storage]\ndb_path = /tmp/x.db\n")
+    config = load_alert_config(path)
+    assert config.enabled is False
+    assert config.apprise_urls == []
+
+
+def test_load_alert_config_parses_thresholds(tmp_path):
+    path = _write(
+        tmp_path,
+        "[alerting]\n"
+        "enabled = yes\n"
+        "apprise_urls = mailto://user:pass@gmail.com\n"
+        "high_threshold_mg_dl = 250\n"
+        "low_threshold_mg_dl = 70\n"
+        "stale_after_days = 2\n",
+    )
+    config = load_alert_config(path)
+    assert config.enabled is True
+    assert config.apprise_urls == ["mailto://user:pass@gmail.com"]
+    assert config.high_threshold_mg_dl == 250
+    assert config.low_threshold_mg_dl == 70
+    assert config.stale_after_days == 2
+
+
+def test_load_alert_config_requires_apprise_urls_when_enabled(tmp_path):
+    path = _write(tmp_path, "[alerting]\nenabled = yes\nhigh_threshold_mg_dl = 250\n")
+    with pytest.raises(ConfigError, match="apprise_urls"):
+        load_alert_config(path)
+
+
+def test_load_alert_config_requires_something_to_check(tmp_path):
+    path = _write(
+        tmp_path, "[alerting]\nenabled = yes\napprise_urls = mailto://user:pass@gmail.com\n"
+    )
+    with pytest.raises(ConfigError, match="nothing to check"):
+        load_alert_config(path)
+
+
+def test_load_alert_config_rejects_negative_threshold(tmp_path):
+    path = _write(tmp_path, "[alerting]\nhigh_threshold_mg_dl = -5\n")
+    with pytest.raises(ConfigError, match="zero or positive"):
+        load_alert_config(path)

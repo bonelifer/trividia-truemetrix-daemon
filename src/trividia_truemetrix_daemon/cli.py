@@ -19,6 +19,7 @@ from .config import (
     DEFAULT_PROFILES_CONFIG,
     OnboardingConfig,
     ProfilesConfig,
+    load_alert_config,
     load_api_config,
     load_config,
     load_onboarding_config,
@@ -83,7 +84,7 @@ def _check_config(config_path: str) -> int:
         return 1
 
     errors: list[str] = []
-    daemon_config = onboarding_config = api_config = profiles_config = None
+    daemon_config = onboarding_config = api_config = profiles_config = alert_config = None
 
     try:
         daemon_config = load_config(config_path)
@@ -99,6 +100,10 @@ def _check_config(config_path: str) -> int:
         errors.append(str(exc))
     try:
         api_config = load_api_config(config_path)
+    except ConfigError as exc:
+        errors.append(str(exc))
+    try:
+        alert_config = load_alert_config(config_path)
     except ConfigError as exc:
         errors.append(str(exc))
 
@@ -121,6 +126,7 @@ def _check_config(config_path: str) -> int:
     print(f"  api.enabled = {api_config.enabled}")
     if onboarding_config.enabled and not api_config.enabled:
         print("  note: api.enabled = no -- assignment prompts will use dunstify, not ntfy")
+    print(f"  alerting.enabled = {alert_config.enabled}")
     return 0
 
 

@@ -24,6 +24,7 @@ trividia-truemetrix-daemon = "trividia_truemetrix_daemon.cli:main"
 trividia-truemetrix-api = "trividia_truemetrix_daemon.api:main"
 trividia-truemetrix-find-unassigned = "trividia_truemetrix_daemon.find_unassigned:main"
 trividia-truemetrix-report = "trividia_truemetrix_daemon.report:main"
+trividia-truemetrix-alert-check = "trividia_truemetrix_daemon.alerting:main"
 
 [project.optional-dependencies]
 dev = [

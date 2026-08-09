@@ -42,6 +42,13 @@ class ProfileConfig:
     sliding_scale is a display convenience for a dosing table this
     person's doctor already gave them -- see dosing.py's module docstring
     for what it is and, more importantly, what it deliberately is not.
+
+    high_threshold_mg_dl/low_threshold_mg_dl override alerting.py's global
+    [alerting] thresholds for this profile's meter(s) specifically -- None
+    means "use the global default". Target ranges vary by treatment plan
+    (type 1 vs type 2, pregnancy, age), so unlike a shared scale's single
+    weight-swing threshold, one glucose threshold rarely fits everyone in
+    a household.
     """
 
     full_name: str
@@ -49,6 +56,8 @@ class ProfileConfig:
     notes: str
     device_ids: tuple[str, ...]
     sliding_scale: tuple[SlidingScaleBand, ...]
+    high_threshold_mg_dl: int | None
+    low_threshold_mg_dl: int | None
 
 
 @dataclass
@@ -102,6 +111,34 @@ _UNITS = ("mg_dl", "mmol_l")
 _DATE_FORMATS = ("us", "world")
 _LAYOUTS = ("full", "simple", "chart")
 _PAGE_SIZES = ("letter", "a4")
+
+
+@dataclass
+class AlertConfig:
+    """Parsed ``[alerting]`` section: optional Apprise-based notifications.
+
+    high_threshold_mg_dl/low_threshold_mg_dl are global defaults, each 0
+    disabling that check; a profile's own high_threshold_mg_dl/
+    low_threshold_mg_dl (see ProfileConfig) overrides these for that
+    profile's meter(s) specifically.
+    """
+
+    enabled: bool
+    apprise_urls: list[str]
+    high_threshold_mg_dl: int
+    low_threshold_mg_dl: int
+    stale_after_days: int
+    state_path: str
+
+
+DEFAULT_ALERT_CONFIG = AlertConfig(
+    enabled=False,
+    apprise_urls=[],
+    high_threshold_mg_dl=0,
+    low_threshold_mg_dl=0,
+    stale_after_days=0,
+    state_path="/var/lib/trividia-truemetrix-daemon/alert-state.json",
+)
 
 
 @dataclass
@@ -163,6 +200,16 @@ def _parse_bool(value: str, key: str) -> bool:
     if normalized in ("no", "false", "0", "off"):
         return False
     raise ConfigError(f"{key} must be yes/no, got {value!r}")
+
+
+def _parse_optional_int(value: str, key: str) -> int | None:
+    """Parse a blank-means-unset integer config value."""
+    if not value:
+        return None
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise ConfigError(f"{key} must be an integer") from exc
 
 
 def _read_parser(config_path: str) -> configparser.ConfigParser:
@@ -243,12 +290,23 @@ def load_profiles_config(config_path: str) -> ProfilesConfig:
         except SlidingScaleError as exc:
             raise ConfigError(str(exc)) from exc
 
+        high_threshold = _parse_optional_int(
+            section.get("high_threshold_mg_dl", "").strip(),
+            f"[{section_name}] high_threshold_mg_dl",
+        )
+        low_threshold = _parse_optional_int(
+            section.get("low_threshold_mg_dl", "").strip(),
+            f"[{section_name}] low_threshold_mg_dl",
+        )
+
         profiles[name] = ProfileConfig(
             full_name=section.get("name", "").strip() or name,
             email=section.get("email", "").strip(),
             notes=section.get("notes", "").strip(),
             device_ids=device_ids,
             sliding_scale=sliding_scale,
+            high_threshold_mg_dl=high_threshold,
+            low_threshold_mg_dl=low_threshold,
         )
 
     return ProfilesConfig(profiles=profiles)
@@ -368,4 +426,71 @@ def load_report_config(config_path: str) -> ReportConfig:
         include_sliding_scale=_parse_bool(
             report.get("include_sliding_scale", "no"), "report.include_sliding_scale"
         ),
+    )
+
+
+def load_alert_config(config_path: str) -> AlertConfig:
+    """Load the ``[alerting]`` section, if present.
+
+    Raises:
+        ConfigError: If the file is missing, a numeric value is invalid, or
+            alerting.enabled = yes with nothing to check (every threshold
+            and stale_after_days left at 0/disabled).
+    """
+    parser = _read_parser(config_path)
+
+    if not parser.has_section("alerting"):
+        return DEFAULT_ALERT_CONFIG
+
+    alerting = parser["alerting"]
+    enabled = _parse_bool(alerting.get("enabled", "no"), "alerting.enabled")
+
+    urls_raw = alerting.get("apprise_urls", "").strip()
+    apprise_urls = [url.strip() for url in urls_raw.split(",") if url.strip()]
+    if enabled and not apprise_urls:
+        raise ConfigError("alerting.apprise_urls must be set when alerting.enabled = yes")
+
+    try:
+        high_threshold = int(
+            alerting.get(
+                "high_threshold_mg_dl", str(DEFAULT_ALERT_CONFIG.high_threshold_mg_dl)
+            )
+        )
+    except ValueError as exc:
+        raise ConfigError("alerting.high_threshold_mg_dl must be an integer") from exc
+    if high_threshold < 0:
+        raise ConfigError("alerting.high_threshold_mg_dl must be zero or positive")
+
+    try:
+        low_threshold = int(
+            alerting.get("low_threshold_mg_dl", str(DEFAULT_ALERT_CONFIG.low_threshold_mg_dl))
+        )
+    except ValueError as exc:
+        raise ConfigError("alerting.low_threshold_mg_dl must be an integer") from exc
+    if low_threshold < 0:
+        raise ConfigError("alerting.low_threshold_mg_dl must be zero or positive")
+
+    try:
+        stale_after_days = int(
+            alerting.get("stale_after_days", str(DEFAULT_ALERT_CONFIG.stale_after_days))
+        )
+    except ValueError as exc:
+        raise ConfigError("alerting.stale_after_days must be an integer") from exc
+    if stale_after_days < 0:
+        raise ConfigError("alerting.stale_after_days must be zero or positive")
+
+    if enabled and high_threshold == 0 and low_threshold == 0 and stale_after_days == 0:
+        raise ConfigError(
+            "alerting.enabled = yes but high_threshold_mg_dl, low_threshold_mg_dl, "
+            "and stale_after_days are all 0 -- nothing to check"
+        )
+
+    return AlertConfig(
+        enabled=enabled,
+        apprise_urls=apprise_urls,
+        high_threshold_mg_dl=high_threshold,
+        low_threshold_mg_dl=low_threshold,
+        stale_after_days=stale_after_days,
+        state_path=alerting.get("state_path", DEFAULT_ALERT_CONFIG.state_path).strip()
+        or DEFAULT_ALERT_CONFIG.state_path,
     )

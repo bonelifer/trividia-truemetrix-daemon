@@ -1,0 +1,8 @@
+[Unit]
+Description=Check TRUE METRIX readings for staleness or out-of-threshold values
+
+[Service]
+Type=oneshot
+User=trividia-truemetrix-daemon
+Group=trividia-truemetrix-daemon
+ExecStart=/usr/bin/trividia-truemetrix-alert-check --config /etc/trividia-truemetrix-daemon/config.ini

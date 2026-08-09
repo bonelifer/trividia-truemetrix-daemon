@@ -48,14 +48,17 @@ library's README for the current verification status.
 - Runs as a `systemd` service with automatic restart on failure.
 - `trividia-truemetrix-report` generates a PDF or CSV table (or line chart)
   of readings -- see [Reports](#reports).
+- `trividia-truemetrix-alert-check` notifies via
+  [Apprise](https://github.com/caronc/apprise) on high/low glucose
+  thresholds or a meter going stale -- see [Alerting](#alerting).
 
 ### Not yet implemented
 
-Deliberately deferred, in no particular order: threshold-based alerting
-(high/low glucose, staleness), a full read-only HTTP API (`/latest`,
-`/report` on demand), MQTT publishing, data pruning, and a Docker image --
-all of which `etekcity-scale-daemon` already has and this could eventually
-mirror. Open an issue/discussion if you want one prioritized.
+Deliberately deferred, in no particular order: a full read-only HTTP API
+(`/latest`, `/report` on demand), MQTT publishing, data pruning, and a
+Docker image -- all of which `etekcity-scale-daemon` already has and this
+could eventually mirror. Open an issue/discussion if you want one
+prioritized.
 
 ## Requirements
 
@@ -112,6 +115,7 @@ sudo "$EDITOR" /etc/trividia-truemetrix-daemon/config.ini
 | `profile.<name>` | `email` | Optional, unused for now (no report header uses it yet). |
 | `profile.<name>` | `notes` | Optional free-text note (e.g. diagnosis, insulin type). Not shown in reports; for your own reference in the config file. |
 | `profile.<name>` | `sliding_scale` | Optional dosing table, one band per line: `low:high:dose[:label]` (`low`/`high` blank = unbounded on that side). See [Reports](#reports) -- **this must come from the person's own doctor; this tool never invents, validates, or adjusts these numbers.** Overlapping bands are rejected at load (an ambiguous table is a safety issue). |
+| `profile.<name>` | `high_threshold_mg_dl` / `low_threshold_mg_dl` | Optional, overrides `[alerting]`'s global thresholds for this profile's meter(s). Blank = use the global default. See [Alerting](#alerting). |
 | `onboarding` | `enabled` | Fire the new-device onboarding notification: `yes` or `no`. Defaults to `no`. |
 | `onboarding` | `ntfy_url` / `ntfy_token` | ntfy topic for the interactive assignment prompt. Requires `[api] enabled = yes`. |
 | `onboarding` | `api_base_url` | Where the API is reachable, for ntfy's action buttons to call back into. Only used when `[api]` is enabled. |
@@ -128,6 +132,11 @@ sudo "$EDITOR" /etc/trividia-truemetrix-daemon/config.ini
 | `report` | `include_device_id` / `include_model` / `include_profile` | Show these columns in the `full` layout: `yes` or `no`. `include_profile` needs `--config` (profile membership isn't in the database). |
 | `report` | `include_summary` | Print a min/max/average/high-count/low-count summary line below the title: `yes` or `no`. PDF only. |
 | `report` | `include_sliding_scale` | Show Dose/Note columns, looked up per reading from a profile's `sliding_scale`: `yes` or `no`. Requires `--profile` (or resolves per section with `--multi-meter`) -- see [Reports](#reports) and its disclaimer. |
+| `alerting` | `enabled` | Notify via Apprise on threshold/staleness conditions: `yes` or `no`. Defaults to `no`. |
+| `alerting` | `apprise_urls` | Comma-separated Apprise service URLs. Required if `enabled = yes`. |
+| `alerting` | `high_threshold_mg_dl` / `low_threshold_mg_dl` | Global default thresholds, mg/dL. `0` disables that check. Overridable per profile -- see above. |
+| `alerting` | `stale_after_days` | Alert if a meter hasn't produced a reading in over this many days. `0` disables the check. |
+| `alerting` | `state_path` | Where per-meter alert state is persisted (throttles repeat alerts). |
 
 ### systemd service
 
@@ -138,6 +147,7 @@ sudo ln -sf /opt/trividia-truemetrix-daemon/venv/bin/trividia-truemetrix-daemon 
 sudo ln -sf /opt/trividia-truemetrix-daemon/venv/bin/trividia-truemetrix-api /usr/bin/trividia-truemetrix-api
 sudo ln -sf /opt/trividia-truemetrix-daemon/venv/bin/trividia-truemetrix-find-unassigned /usr/bin/trividia-truemetrix-find-unassigned
 sudo ln -sf /opt/trividia-truemetrix-daemon/venv/bin/trividia-truemetrix-report /usr/bin/trividia-truemetrix-report
+sudo ln -sf /opt/trividia-truemetrix-daemon/venv/bin/trividia-truemetrix-alert-check /usr/bin/trividia-truemetrix-alert-check
 sudo systemctl daemon-reload
 sudo systemctl enable --now trividia-truemetrix-daemon
 ```
@@ -193,6 +203,59 @@ curl "http://127.0.0.1:8080/assign-device?device_id=Trividia-BLU-12345678&profil
 ```bash
 trividia-truemetrix-find-unassigned --config /etc/trividia-truemetrix-daemon/config.ini
 ```
+
+## Alerting
+
+Also optional and not enabled by default. `trividia-truemetrix-alert-check`
+checks every known meter's most recent reading for two kinds of condition
+and notifies via [Apprise](https://github.com/caronc/apprise) when
+triggered:
+
+- **High/low threshold**: the latest reading is above `high_threshold_mg_dl`
+  or below `low_threshold_mg_dl`. These are practical thresholds you set
+  for actionable notification -- distinct from the meter's own fixed
+  HI (>600 mg/dL)/LO (<20 mg/dL) display flags, which are already
+  emergency-level values by the time they're reached.
+- **Staleness**: a meter hasn't produced a reading in over `stale_after_days`
+  days.
+
+All three are `0`/disabled by default. Set at least one to a positive
+value, plus `apprise_urls`, in `[alerting]`:
+
+```ini
+[alerting]
+enabled = yes
+apprise_urls = tgram://bot_token/chat_id, mailto://user:password@gmail.com
+high_threshold_mg_dl = 250
+low_threshold_mg_dl = 70
+stale_after_days = 2
+```
+
+A profile's own `high_threshold_mg_dl`/`low_threshold_mg_dl` (see the
+config table above) overrides these globals for that profile's meter(s)
+specifically -- useful once more than one person's readings share a
+database, since target ranges vary by treatment plan.
+
+Run it periodically with the bundled timer:
+
+```bash
+sudo cp systemd/trividia-truemetrix-alert-check.service systemd/trividia-truemetrix-alert-check.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now trividia-truemetrix-alert-check.timer
+```
+
+Defaults to `OnCalendar=hourly`. A high/low alert only fires once per
+newly-arrived reading that crosses the threshold, not on every subsequent
+check while that same reading stays the latest one. A repeat staleness
+alert is throttled to at most once per day while the condition persists.
+State is tracked in `alerting.state_path` (default
+`/var/lib/trividia-truemetrix-daemon/alert-state.json`); delete it to reset
+throttling.
+
+**This checks the local database, not the meter in real time** -- like
+everything else in this daemon, an alert only fires once a meter has
+actually been docked and synced (see the top-of-README disclaimer). It is
+not, and cannot be, real-time hypo/hyperglycemia protection.
 
 ## Manual usage
 

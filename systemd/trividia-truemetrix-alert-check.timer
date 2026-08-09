@@ -1,0 +1,9 @@
+[Unit]
+Description=Hourly TRUE METRIX alert check
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+
+[Install]
+WantedBy=timers.target

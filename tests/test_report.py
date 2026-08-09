@@ -44,6 +44,7 @@ def _profiles() -> ProfilesConfig:
             "Alice": ProfileConfig(
                 full_name="Alice Smith", email="", notes="", sliding_scale=(),
                 device_ids=("Trividia-BLU-11111111",),
+                high_threshold_mg_dl=None, low_threshold_mg_dl=None,
             )
         }
     )
@@ -258,6 +259,7 @@ def test_build_multi_meter_pdf_resolves_sliding_scale_per_section(tmp_path):
                 full_name="Alice", email="", notes="",
                 device_ids=("Trividia-BLU-11111111",),
                 sliding_scale=parse_sliding_scale("0:500:2", "test"),
+                high_threshold_mg_dl=None, low_threshold_mg_dl=None,
             )
         }
     )
