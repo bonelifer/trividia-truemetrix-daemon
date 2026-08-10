@@ -31,40 +31,28 @@ page edge. `report.include_device_id`/`include_model`/`include_profile`
 still work, but only for `--format csv`, which has no page-width
 constraint (and no header to fall back on) forcing the same tradeoff.
 
-## single/ -- layout x unit x date format (full layout)
+## single/ -- the complete layout x unit x date format matrix
 
-| File | Layout | Unit | Date format |
-|---|---|---|---|
-| [full-mgdl-world.pdf](single/full-mgdl-world.pdf) | full | mg/dL | world |
-| [full-mgdl-us.pdf](single/full-mgdl-us.pdf) | full | mg/dL | us |
-| [full-mmol-world.pdf](single/full-mmol-world.pdf) | full | mmol/L | world |
-| [full-mmol-us.pdf](single/full-mmol-us.pdf) | full | mmol/L | us |
+All 3 layouts x 2 units x 2 date formats = 12 files.
 
-The `full` layout is the only one with per-reading Dose/Note columns; all
-four samples above show them (the default). The fixture includes one
-reading that falls in the "call doctor" band (301+) and one below range
-("do not dose"), so both show up
-in the per-reading columns here.
+| Layout | mg/dL, world | mg/dL, us | mmol/L, world | mmol/L, us |
+|---|---|---|---|---|
+| full | [full-mgdl-world.pdf](single/full-mgdl-world.pdf) | [full-mgdl-us.pdf](single/full-mgdl-us.pdf) | [full-mmol-world.pdf](single/full-mmol-world.pdf) | [full-mmol-us.pdf](single/full-mmol-us.pdf) |
+| simple | [simple-mgdl-world.pdf](single/simple-mgdl-world.pdf) | [simple-mgdl-us.pdf](single/simple-mgdl-us.pdf) | [simple-mmol-world.pdf](single/simple-mmol-world.pdf) | [simple-mmol-us.pdf](single/simple-mmol-us.pdf) |
+| chart | [chart-mgdl-world.pdf](single/chart-mgdl-world.pdf) | [chart-mgdl-us.pdf](single/chart-mgdl-us.pdf) | [chart-mmol-world.pdf](single/chart-mmol-world.pdf) | [chart-mmol-us.pdf](single/chart-mmol-us.pdf) |
 
-## single/ -- simple layout
+The patient header (Patient/Email/Meter/Notes) and Sliding Scale
+(Reference) table appear in every file above -- both are
+layout-independent. Only the `full` layout additionally has per-reading
+Dose/Note columns (and, for a report spanning more than one owner,
+`include_profile`); `simple` is date/glucose only in side-by-side column
+pairs, and `chart` is a line chart of glucose over time. `us` vs. `world`
+changes both the Date/Time column/axis-label format and which date
+components are more prominent (`%m/%d` axis labels vs. `%d/%m`).
 
-| File | Unit |
-|---|---|
-| [simple-mgdl-world.pdf](single/simple-mgdl-world.pdf) | mg/dL |
-| [simple-mmol-world.pdf](single/simple-mmol-world.pdf) | mmol/L |
-
-Date/glucose only, in side-by-side column pairs. The patient header and
-sliding-scale reference table still appear (they're layout-independent);
-only the per-reading Dose/Note columns are full-layout-only.
-
-## single/ -- chart layout
-
-| File |
-|---|
-| [chart-mgdl-world.pdf](single/chart-mgdl-world.pdf) |
-
-A line chart of glucose over time instead of a table. Same as `simple`:
-the header and reference table still appear above the chart.
+The fixture includes one reading that falls in the "call doctor" band
+(301+) and one below range ("do not dose"), so both show up in the `full`
+layout's per-reading columns.
 
 **This is a display lookup of a table Alice's own doctor already
 prescribed -- it is not computed, validated, or recommended by this
