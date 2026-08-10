@@ -1,0 +1,20 @@
+services:
+  trividia-truemetrix-daemon:
+    build: .
+    # USB HID access needs the container to reach the meter's /dev/hidrawN
+    # node. Unlike a BLE daemon (one stable D-Bus/adapter path), hidraw
+    # node numbers are assigned dynamically per USB enumeration and the
+    # meter is only present intermittently (docked occasionally, not
+    # always-on) -- so a fixed --device=/dev/hidrawN mapping is fragile.
+    # Bind-mounting all of /dev plus privileged: true is the simplest
+    # reliable option for a single-host hobbyist setup; it grants the
+    # container broader device access than strictly necessary. If your
+    # meter's hidraw node is stable, replace both with a scoped
+    # `devices: ["/dev/hidraw0:/dev/hidraw0"]` instead. UNVERIFIED -- see
+    # the Docker section of the README before relying on this.
+    privileged: true
+    volumes:
+      - /dev:/dev
+      - ./config:/etc/trividia-truemetrix-daemon
+      - ./data:/var/lib/trividia-truemetrix-daemon
+    restart: unless-stopped
