@@ -271,3 +271,22 @@ def test_build_multi_meter_pdf_resolves_sliding_scale_per_section(tmp_path):
     out_path = str(tmp_path / "multi.pdf")
     build_multi_meter_pdf(sections, out_path, _sliding_scale_report_config(), profiles)
     assert tmp_path.joinpath("multi.pdf").stat().st_size > 0
+
+
+def test_build_pdf_with_profile_header_produces_nonempty_file(tmp_path):
+    db_path = str(tmp_path / "readings.db")
+    _seed(db_path)
+    assignments = AssignmentStore(str(tmp_path / "assignments.json"))
+    rows = fetch_rows(db_path, _profiles(), assignments, "Trividia-BLU-11111111", None, None)
+    profile = ProfileConfig(
+        full_name="Alice Smith", email="alice@example.com", notes="Type 1, uses Humalog",
+        device_ids=("Trividia-BLU-11111111",),
+        sliding_scale=parse_sliding_scale("0:500:2:in range", "test"),
+        high_threshold_mg_dl=None, low_threshold_mg_dl=None,
+    )
+
+    out_path = str(tmp_path / "report.pdf")
+    build_pdf(
+        rows, out_path, _sliding_scale_report_config(), profile.sliding_scale, profile
+    )
+    assert tmp_path.joinpath("report.pdf").stat().st_size > 0

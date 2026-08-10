@@ -16,7 +16,8 @@ db_path = /var/lib/trividia-truemetrix-daemon/readings.db
 # for matching. Each device_id comes from a synced meter's
 # Trividia-<model_code>-<serial> identifier -- run with --check-config, or
 # check trividia-truemetrix-find-unassigned, to see device_ids seen but not
-# yet claimed here. "notes" is free text for your own reference.
+# yet claimed here. "notes" is free text (e.g. diagnosis, insulin type);
+# shown in PDF report headers for this profile, not shown in CSV.
 #
 # sliding_scale is an optional insulin dosing table (see the Reports
 # section of the README) -- IMPORTANT: that value must come from the

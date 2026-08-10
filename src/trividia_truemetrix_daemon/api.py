@@ -198,23 +198,25 @@ async def handle_report(request: web.Request) -> web.Response:
     assignments: AssignmentStore = request.app["assignments"]
 
     sliding_scale: tuple = ()
-    if report_config.include_sliding_scale and not multi_meter:
-        if not profile:
-            return web.json_response(
-                {
-                    "error": (
-                        "report.include_sliding_scale is enabled but no ?profile= was "
-                        "given -- the dosing table comes from that profile's "
-                        "[profile.<name>] section"
-                    )
-                },
-                status=400,
-            )
+    profile_obj = None
+    if profile and not multi_meter:
         if profile not in profiles_config.profiles:
             return web.json_response(
                 {"error": f"no [profile.{profile}] section in the config"}, status=400
             )
-        sliding_scale = profiles_config.profiles[profile].sliding_scale
+        profile_obj = profiles_config.profiles[profile]
+        sliding_scale = profile_obj.sliding_scale
+    elif report_config.include_sliding_scale and not multi_meter:
+        return web.json_response(
+            {
+                "error": (
+                    "report.include_sliding_scale is enabled but no ?profile= was "
+                    "given -- the dosing table comes from that profile's "
+                    "[profile.<name>] section"
+                )
+            },
+            status=400,
+        )
 
     fd, temp_path = tempfile.mkstemp(suffix=f".{fmt}")
     os.close(fd)
@@ -242,7 +244,7 @@ async def handle_report(request: web.Request) -> web.Response:
                 build_csv(rows, temp_path, report_config, sliding_scale)
                 content_type = "text/csv"
             else:
-                build_pdf(rows, temp_path, report_config, sliding_scale)
+                build_pdf(rows, temp_path, report_config, sliding_scale, profile_obj)
                 content_type = "application/pdf"
         with open(temp_path, "rb") as report_file:
             body = report_file.read()
