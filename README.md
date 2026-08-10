@@ -51,14 +51,15 @@ library's README for the current verification status.
 - `trividia-truemetrix-alert-check` notifies via
   [Apprise](https://github.com/caronc/apprise) on high/low glucose
   thresholds or a meter going stale -- see [Alerting](#alerting).
+- A local, read-only HTTP API (`/latest`, on-demand `/report`) for fetching
+  data without shelling in -- see [HTTP API](#http-api).
 
 ### Not yet implemented
 
-Deliberately deferred, in no particular order: a full read-only HTTP API
-(`/latest`, `/report` on demand), MQTT publishing, data pruning, and a
-Docker image -- all of which `etekcity-scale-daemon` already has and this
-could eventually mirror. Open an issue/discussion if you want one
-prioritized.
+Deliberately deferred, in no particular order: MQTT publishing, data
+pruning, and a Docker image -- all of which `etekcity-scale-daemon` already
+has and this could eventually mirror. Open an issue/discussion if you want
+one prioritized.
 
 ## Requirements
 
@@ -123,8 +124,8 @@ sudo "$EDITOR" /etc/trividia-truemetrix-daemon/config.ini
 | `onboarding` | `admin_apprise_urls` | Comma-separated Apprise URLs for the unconditional admin heads-up (include a `mailto://` URL for email). |
 | `onboarding` | `state_path` | Where "already prompted" state is tracked (once per device_id, ever). |
 | `onboarding` | `assignments_path` | Where dynamic (button-tap) device_id -> profile assignments are stored, separate from the static config. |
-| `api` | `enabled` | Run the local HTTP API: `yes` or `no`. Only needed for the ntfy callback. |
-| `api` | `host` / `port` / `token` | Bind address/port, and an optional bearer token required on `/assign-device`. |
+| `api` | `enabled` | Run the local HTTP API: `yes` or `no`. See [HTTP API](#http-api); also needed for the ntfy assignment callback. |
+| `api` | `host` / `port` / `token` | Bind address/port, and an optional bearer token required on every endpoint except `/health`. |
 | `report` | `unit` | `mg_dl` or `mmol_l`. Defaults to `mg_dl` (what the meter itself always reports). |
 | `report` | `date_format` | `us` (MM/DD/YYYY, 12-hour) or `world` (DD/MM/YYYY, 24-hour). |
 | `report` | `layout` | `full` (one row per reading), `simple` (date/glucose only, side-by-side columns), or `chart` (a line chart of glucose over time). PDF only. |
@@ -256,6 +257,52 @@ throttling.
 everything else in this daemon, an alert only fires once a meter has
 actually been docked and synced (see the top-of-README disclaimer). It is
 not, and cannot be, real-time hypo/hyperglycemia protection.
+
+## HTTP API
+
+Also optional and not enabled by default. `trividia-truemetrix-api` runs a
+small local HTTP server exposing the same data as the other tools. It
+reads the SQLite database directly and works whether or not the daemon is
+currently running.
+
+```ini
+[api]
+enabled = yes
+host = 127.0.0.1
+port = 8080
+token =
+```
+
+```bash
+sudo cp systemd/trividia-truemetrix-api.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now trividia-truemetrix-api.service
+```
+
+Endpoints:
+
+| Method & path | Description |
+|---|---|
+| `GET /health` | Unauthenticated liveness check: `{"status": "ok", "version": "..."}`. |
+| `GET /latest[?device_id=...&profile=...]` | Most recent reading for each meter (or one, if filtered), as JSON, with `profile` resolved the same way the daemon itself resolves it. |
+| `GET /report[?format=pdf\|csv&period=...&from=...&to=...&device_id=...&profile=...&multi_meter=1]` | Generates a report on demand using the same `[report]` config as `trividia-truemetrix-report`, returned as a file download. `multi_meter=1` is the query-string equivalent of `--multi-meter`; `report.include_sliding_scale = yes` still requires `?profile=` (or resolves per section under `multi_meter=1`), same as the CLI. |
+| `GET`/`POST /assign-device?device_id=...&profile=...` | Bind a meter to a profile -- see [Onboarding new devices](#onboarding-new-devices). |
+
+```bash
+curl http://127.0.0.1:8080/latest
+curl -o report.pdf "http://127.0.0.1:8080/report?profile=Alice&period=30d"
+```
+
+**There's no TLS built in.** `host` defaults to `127.0.0.1` (loopback only)
+for a reason: don't bind it to `0.0.0.0` or a LAN-facing interface without
+putting a reverse proxy (with TLS and its own auth) in front of it.
+Setting `api.token` requires an `Authorization: Bearer <token>` header on
+every endpoint except `/health`, which is worth doing even on loopback if
+other local users/processes on the same host shouldn't see glucose data:
+
+```bash
+curl -H "Authorization: Bearer <token>" http://127.0.0.1:8080/latest
+```
 
 ## Manual usage
 

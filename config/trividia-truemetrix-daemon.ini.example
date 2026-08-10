@@ -107,9 +107,9 @@ admin_apprise_urls =
 state_path = /var/lib/trividia-truemetrix-daemon/onboarding-state.json
 assignments_path = /var/lib/trividia-truemetrix-daemon/device-assignments.json
 
-# Local HTTP API: only used for ntfy's assignment-prompt callback right
-# now (no /latest or /report yet). Not needed if onboarding.enabled = no,
-# or if you're fine with the dunstify-only prompt path.
+# Local read-only HTTP API (/health, /latest, /report) plus the ntfy
+# assignment callback (/assign-device). host defaults to loopback-only --
+# see the README's HTTP API section before binding this anywhere else.
 [api]
 enabled = no
 host = 127.0.0.1
