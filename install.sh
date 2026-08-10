@@ -37,6 +37,7 @@ ln -sf "${INSTALL_DIR}/venv/bin/trividia-truemetrix-find-unassigned" \
 ln -sf "${INSTALL_DIR}/venv/bin/trividia-truemetrix-report" /usr/bin/trividia-truemetrix-report
 ln -sf "${INSTALL_DIR}/venv/bin/trividia-truemetrix-alert-check" \
     /usr/bin/trividia-truemetrix-alert-check
+ln -sf "${INSTALL_DIR}/venv/bin/trividia-truemetrix-prune" /usr/bin/trividia-truemetrix-prune
 
 echo "==> Seeding config"
 mkdir -p "${CONFIG_DIR}"

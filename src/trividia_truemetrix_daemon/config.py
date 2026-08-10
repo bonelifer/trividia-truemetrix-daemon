@@ -142,6 +142,36 @@ DEFAULT_ALERT_CONFIG = AlertConfig(
 
 
 @dataclass
+class MqttConfig:
+    """Parsed ``[mqtt]`` section: optional MQTT publishing of synced readings."""
+
+    enabled: bool
+    host: str
+    port: int
+    username: str
+    password: str
+    use_tls: bool
+    topic_prefix: str
+    qos: int
+    retain: bool
+
+
+DEFAULT_MQTT_CONFIG = MqttConfig(
+    enabled=False,
+    host="",
+    port=1883,
+    username="",
+    password="",
+    use_tls=False,
+    topic_prefix="trividia_truemetrix_daemon",
+    qos=0,
+    retain=True,
+)
+
+_QOS_LEVELS = (0, 1, 2)
+
+
+@dataclass
 class OnboardingConfig:
     """Parsed ``[onboarding]`` section: new-device assignment notifications.
 
@@ -493,4 +523,48 @@ def load_alert_config(config_path: str) -> AlertConfig:
         stale_after_days=stale_after_days,
         state_path=alerting.get("state_path", DEFAULT_ALERT_CONFIG.state_path).strip()
         or DEFAULT_ALERT_CONFIG.state_path,
+    )
+
+
+def load_mqtt_config(config_path: str) -> MqttConfig:
+    """Load the ``[mqtt]`` section, if present.
+
+    Raises:
+        ConfigError: If the file is missing, enabled without a host, or a
+            numeric value is invalid.
+    """
+    parser = _read_parser(config_path)
+
+    if not parser.has_section("mqtt"):
+        return DEFAULT_MQTT_CONFIG
+
+    mqtt = parser["mqtt"]
+    enabled = _parse_bool(mqtt.get("enabled", "no"), "mqtt.enabled")
+
+    host = mqtt.get("host", "").strip()
+    if enabled and not host:
+        raise ConfigError("mqtt.host must be set when mqtt.enabled = yes")
+
+    try:
+        port = int(mqtt.get("port", str(DEFAULT_MQTT_CONFIG.port)))
+    except ValueError as exc:
+        raise ConfigError("mqtt.port must be an integer") from exc
+
+    try:
+        qos = int(mqtt.get("qos", str(DEFAULT_MQTT_CONFIG.qos)))
+    except ValueError as exc:
+        raise ConfigError("mqtt.qos must be an integer") from exc
+    if qos not in _QOS_LEVELS:
+        raise ConfigError(f"mqtt.qos must be one of {_QOS_LEVELS}, got {qos!r}")
+
+    return MqttConfig(
+        enabled=enabled,
+        host=host,
+        port=port,
+        username=mqtt.get("username", "").strip(),
+        password=mqtt.get("password", "").strip(),
+        use_tls=_parse_bool(mqtt.get("use_tls", "no"), "mqtt.use_tls"),
+        topic_prefix=mqtt.get("topic_prefix", DEFAULT_MQTT_CONFIG.topic_prefix).strip(),
+        qos=qos,
+        retain=_parse_bool(mqtt.get("retain", "yes"), "mqtt.retain"),
     )

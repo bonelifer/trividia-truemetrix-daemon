@@ -15,16 +15,20 @@ from .config import (
     ApiConfig,
     ConfigError,
     DEFAULT_API_CONFIG,
+    DEFAULT_MQTT_CONFIG,
     DEFAULT_ONBOARDING_CONFIG,
     DEFAULT_PROFILES_CONFIG,
+    MqttConfig,
     OnboardingConfig,
     ProfilesConfig,
     load_alert_config,
     load_api_config,
     load_config,
+    load_mqtt_config,
     load_onboarding_config,
     load_profiles_config,
 )
+from .mqtt import mqtt_connection
 from .storage import ReadingStore
 from .sync import PollLoop
 
@@ -38,6 +42,7 @@ async def run_daemon(
     onboarding_config: OnboardingConfig = DEFAULT_ONBOARDING_CONFIG,
     profiles_config: ProfilesConfig = DEFAULT_PROFILES_CONFIG,
     api_config: ApiConfig = DEFAULT_API_CONFIG,
+    mqtt_config: MqttConfig = DEFAULT_MQTT_CONFIG,
     once: bool = False,
     once_timeout: float = 60.0,
 ) -> bool:
@@ -49,9 +54,6 @@ async def run_daemon(
     """
     store = ReadingStore(db_path)
     assignments = AssignmentStore(onboarding_config.assignments_path)
-    loop = PollLoop(
-        store, onboarding_config, profiles_config, assignments, api_config, poll_interval_seconds
-    )
 
     _LOGGER.info(
         "Starting trividia-truemetrix-daemon %s (config=%s%s)",
@@ -61,18 +63,24 @@ async def run_daemon(
     )
 
     try:
-        if once:
-            synced = await loop.run_once(once_timeout)
-            if not synced:
-                _LOGGER.warning("No meter synced within %s seconds", once_timeout)
-            return synced
+        async with mqtt_connection(mqtt_config) as mqtt_client:
+            loop = PollLoop(
+                store, onboarding_config, profiles_config, assignments, api_config,
+                poll_interval_seconds, mqtt_client, mqtt_config,
+            )
 
-        stop_event = asyncio.Event()
-        running_loop = asyncio.get_running_loop()
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            running_loop.add_signal_handler(sig, stop_event.set)
-        await loop.run(stop_event)
-        return True
+            if once:
+                synced = await loop.run_once(once_timeout)
+                if not synced:
+                    _LOGGER.warning("No meter synced within %s seconds", once_timeout)
+                return synced
+
+            stop_event = asyncio.Event()
+            running_loop = asyncio.get_running_loop()
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                running_loop.add_signal_handler(sig, stop_event.set)
+            await loop.run(stop_event)
+            return True
     finally:
         store.close()
 
@@ -84,7 +92,8 @@ def _check_config(config_path: str) -> int:
         return 1
 
     errors: list[str] = []
-    daemon_config = onboarding_config = api_config = profiles_config = alert_config = None
+    daemon_config = onboarding_config = api_config = profiles_config = None
+    alert_config = mqtt_config = None
 
     try:
         daemon_config = load_config(config_path)
@@ -104,6 +113,10 @@ def _check_config(config_path: str) -> int:
         errors.append(str(exc))
     try:
         alert_config = load_alert_config(config_path)
+    except ConfigError as exc:
+        errors.append(str(exc))
+    try:
+        mqtt_config = load_mqtt_config(config_path)
     except ConfigError as exc:
         errors.append(str(exc))
 
@@ -127,6 +140,7 @@ def _check_config(config_path: str) -> int:
     if onboarding_config.enabled and not api_config.enabled:
         print("  note: api.enabled = no -- assignment prompts will use dunstify, not ntfy")
     print(f"  alerting.enabled = {alert_config.enabled}")
+    print(f"  mqtt.enabled = {mqtt_config.enabled}")
     return 0
 
 
@@ -161,6 +175,7 @@ def main(argv: list[str] | None = None) -> None:
         profiles_config = load_profiles_config(args.config)
         onboarding_config = load_onboarding_config(args.config)
         api_config = load_api_config(args.config)
+        mqtt_config = load_mqtt_config(args.config)
     except ConfigError as exc:
         print(f"Error: {exc}")
         raise SystemExit(1) from exc
@@ -174,6 +189,7 @@ def main(argv: list[str] | None = None) -> None:
                 onboarding_config,
                 profiles_config,
                 api_config,
+                mqtt_config,
                 once=args.once,
                 once_timeout=args.once_timeout,
             )

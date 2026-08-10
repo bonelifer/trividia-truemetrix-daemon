@@ -7,6 +7,7 @@ from trividia_truemetrix_daemon.config import (
     load_alert_config,
     load_api_config,
     load_config,
+    load_mqtt_config,
     load_onboarding_config,
     load_profiles_config,
 )
@@ -250,3 +251,48 @@ def test_load_alert_config_rejects_negative_threshold(tmp_path):
     path = _write(tmp_path, "[alerting]\nhigh_threshold_mg_dl = -5\n")
     with pytest.raises(ConfigError, match="zero or positive"):
         load_alert_config(path)
+
+
+def test_load_mqtt_config_defaults_to_disabled(tmp_path):
+    path = _write(tmp_path, "[storage]\ndb_path = /tmp/x.db\n")
+    config = load_mqtt_config(path)
+    assert config.enabled is False
+    assert config.topic_prefix == "trividia_truemetrix_daemon"
+
+
+def test_load_mqtt_config_parses_values(tmp_path):
+    path = _write(
+        tmp_path,
+        "[mqtt]\n"
+        "enabled = yes\n"
+        "host = broker.example.com\n"
+        "port = 8883\n"
+        "username = user\n"
+        "password = pass\n"
+        "use_tls = yes\n"
+        "topic_prefix = custom_prefix\n"
+        "qos = 1\n"
+        "retain = no\n",
+    )
+    config = load_mqtt_config(path)
+    assert config.enabled is True
+    assert config.host == "broker.example.com"
+    assert config.port == 8883
+    assert config.username == "user"
+    assert config.password == "pass"
+    assert config.use_tls is True
+    assert config.topic_prefix == "custom_prefix"
+    assert config.qos == 1
+    assert config.retain is False
+
+
+def test_load_mqtt_config_requires_host_when_enabled(tmp_path):
+    path = _write(tmp_path, "[mqtt]\nenabled = yes\n")
+    with pytest.raises(ConfigError, match="host"):
+        load_mqtt_config(path)
+
+
+def test_load_mqtt_config_rejects_bad_qos(tmp_path):
+    path = _write(tmp_path, "[mqtt]\nhost = broker.example.com\nqos = 5\n")
+    with pytest.raises(ConfigError, match="qos"):
+        load_mqtt_config(path)

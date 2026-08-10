@@ -53,13 +53,16 @@ library's README for the current verification status.
   thresholds or a meter going stale -- see [Alerting](#alerting).
 - A local, read-only HTTP API (`/latest`, on-demand `/report`) for fetching
   data without shelling in -- see [HTTP API](#http-api).
+- Optional MQTT publishing of each newly-synced reading, as JSON -- see
+  [MQTT](#mqtt).
+- `trividia-truemetrix-prune` manually deletes readings older than a given
+  number of days -- see [Pruning old data](#pruning-old-data).
 
 ### Not yet implemented
 
-Deliberately deferred, in no particular order: MQTT publishing, data
-pruning, and a Docker image -- all of which `etekcity-scale-daemon` already
-has and this could eventually mirror. Open an issue/discussion if you want
-one prioritized.
+Deliberately deferred: a Docker image, which `etekcity-scale-daemon`
+already has and this could eventually mirror. Open an issue/discussion if
+you want it prioritized.
 
 ## Requirements
 
@@ -138,6 +141,14 @@ sudo "$EDITOR" /etc/trividia-truemetrix-daemon/config.ini
 | `alerting` | `high_threshold_mg_dl` / `low_threshold_mg_dl` | Global default thresholds, mg/dL. `0` disables that check. Overridable per profile -- see above. |
 | `alerting` | `stale_after_days` | Alert if a meter hasn't produced a reading in over this many days. `0` disables the check. |
 | `alerting` | `state_path` | Where per-meter alert state is persisted (throttles repeat alerts). |
+| `mqtt` | `enabled` | Publish each newly-synced reading to MQTT as JSON: `yes` or `no`. Defaults to `no`. |
+| `mqtt` | `host` | Broker hostname. Required if `enabled = yes`. |
+| `mqtt` | `port` | Broker port. Defaults to `1883`. |
+| `mqtt` | `username` / `password` | Optional broker credentials. |
+| `mqtt` | `use_tls` | Wrap the connection in TLS: `yes` or `no`. Defaults to `no`. |
+| `mqtt` | `topic_prefix` | Messages publish to `<topic_prefix>/<device_id>/state`. Defaults to `trividia_truemetrix_daemon`. |
+| `mqtt` | `qos` | MQTT QoS level: `0`, `1`, or `2`. Defaults to `0`. |
+| `mqtt` | `retain` | Whether the broker retains the last message for new subscribers: `yes` or `no`. Defaults to `yes`. |
 
 ### systemd service
 
@@ -149,6 +160,7 @@ sudo ln -sf /opt/trividia-truemetrix-daemon/venv/bin/trividia-truemetrix-api /us
 sudo ln -sf /opt/trividia-truemetrix-daemon/venv/bin/trividia-truemetrix-find-unassigned /usr/bin/trividia-truemetrix-find-unassigned
 sudo ln -sf /opt/trividia-truemetrix-daemon/venv/bin/trividia-truemetrix-report /usr/bin/trividia-truemetrix-report
 sudo ln -sf /opt/trividia-truemetrix-daemon/venv/bin/trividia-truemetrix-alert-check /usr/bin/trividia-truemetrix-alert-check
+sudo ln -sf /opt/trividia-truemetrix-daemon/venv/bin/trividia-truemetrix-prune /usr/bin/trividia-truemetrix-prune
 sudo systemctl daemon-reload
 sudo systemctl enable --now trividia-truemetrix-daemon
 ```
@@ -303,6 +315,64 @@ other local users/processes on the same host shouldn't see glucose data:
 ```bash
 curl -H "Authorization: Bearer <token>" http://127.0.0.1:8080/latest
 ```
+
+## MQTT
+
+Set `[mqtt] enabled = yes` (plus `host`) to publish each newly-synced
+reading to an MQTT broker as JSON, alongside the local SQLite recording:
+
+```ini
+[mqtt]
+enabled = yes
+host = broker.example.com
+port = 1883
+username = myuser
+password = mypassword
+use_tls = no
+topic_prefix = trividia_truemetrix_daemon
+qos = 0
+retain = yes
+```
+
+Each reading publishes to `<topic_prefix>/<device_id>/state`, e.g.
+`trividia_truemetrix_daemon/Trividia-BLU-12345678/state`:
+
+```json
+{"device_id": "Trividia-BLU-12345678", "model": "TRUE METRIX AIR", "device_time": "2026-06-15T08:00:00", "value_mg_dl": 95, "out_of_range": null}
+```
+
+A broker that's down or unreachable is logged as a warning and otherwise
+ignored -- USB HID sync to the local database is the daemon's primary job
+and is never blocked by an MQTT outage. Only *newly-inserted* readings are
+published (see [Database schema](#database-schema) on why re-syncing a
+meter is otherwise a no-op) -- re-docking an already-synced meter doesn't
+republish its whole history. Check `--check-config` to confirm the daemon
+parsed your `[mqtt]` settings as expected before relying on it.
+
+There's no Home Assistant MQTT discovery support (auto-creating entities):
+this publishes raw JSON only. Subscribe and parse it yourself, or wire up
+discovery messages separately if you need that.
+
+## Pruning old data
+
+`trividia-truemetrix-prune` deletes readings older than a given number of
+days. It's manual only: nothing in the daemon deletes data automatically.
+It's a **dry run by default**: it reports how many rows match without
+touching anything, until you pass `--yes`.
+
+```bash
+# See how many readings older than 365 days would be deleted
+trividia-truemetrix-prune --config /etc/trividia-truemetrix-daemon/config.ini --older-than 365
+
+# Actually delete them (also reclaims disk space with VACUUM)
+trividia-truemetrix-prune --config /etc/trividia-truemetrix-daemon/config.ini --older-than 365 --yes
+```
+
+Add `--device-id Trividia-BLU-12345678` to restrict pruning to one meter.
+`--db` works the same as with `trividia-truemetrix-report`, bypassing the
+config file. Pruning is keyed on `device_time` (the meter's own clock),
+matching what reports and alerting already use -- see [Database
+schema](#database-schema).
 
 ## Manual usage
 

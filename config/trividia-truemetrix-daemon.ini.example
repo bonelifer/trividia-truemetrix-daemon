@@ -76,6 +76,23 @@ stale_after_days = 0
 
 state_path = /var/lib/trividia-truemetrix-daemon/alert-state.json
 
+# Publish each newly-synced reading to an MQTT broker as JSON, alongside
+# the local SQLite recording. A broker that's down or unreachable is
+# logged as a warning and otherwise ignored -- local recording is never
+# blocked by an MQTT outage.
+[mqtt]
+enabled = no
+host =
+port = 1883
+username =
+password =
+use_tls = no
+
+# Each reading publishes to <topic_prefix>/<device_id>/state.
+topic_prefix = trividia_truemetrix_daemon
+qos = 0
+retain = yes
+
 # New-device onboarding: when a meter with an unrecognized device_id syncs
 # for the first time, an interactive assignment prompt (ntfy or dunstify --
 # see below) and an unconditional admin notification both fire once, then

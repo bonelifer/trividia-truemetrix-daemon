@@ -14,28 +14,30 @@ import asyncio
 import datetime
 import logging
 
-from trividia_truemetrix_hid import TrueMetrixClient, discover
+from trividia_truemetrix_hid import Reading, TrueMetrixClient, discover
 from trividia_truemetrix_hid.client import TrueMetrixError
 
 from . import onboarding
 from .assignments import AssignmentStore
-from .config import ApiConfig, OnboardingConfig, ProfilesConfig
+from .config import ApiConfig, DEFAULT_MQTT_CONFIG, MqttConfig, OnboardingConfig, ProfilesConfig
+from .mqtt import publish_reading
 from .storage import ReadingStore
 
 _LOGGER = logging.getLogger(__name__)
 
 
-def _sync_device_blocking(path: bytes, store: ReadingStore) -> tuple[str, str, int]:
+def _sync_device_blocking(path: bytes, store: ReadingStore) -> tuple[str, str, list[Reading]]:
     """Blocking HID I/O: connect, download, store. Run via asyncio.to_thread.
 
-    Returns (device_id, model, new_reading_count).
+    Returns (device_id, model, newly-inserted readings) -- the readings
+    are what get published to MQTT, if enabled.
     """
     with TrueMetrixClient(path=path) as client:
         info = client.get_device_info()
         readings = client.get_readings()
 
         synced_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        new_count = 0
+        new_readings = []
         for reading in readings:
             row_id = store.record(
                 device_id=info.device_id,
@@ -48,9 +50,9 @@ def _sync_device_blocking(path: bytes, store: ReadingStore) -> tuple[str, str, i
                 synced_at=synced_at,
             )
             if row_id is not None:
-                new_count += 1
+                new_readings.append(reading)
 
-        return info.device_id, info.model, new_count
+        return info.device_id, info.model, new_readings
 
 
 async def sync_device(
@@ -60,15 +62,24 @@ async def sync_device(
     profiles_config: ProfilesConfig,
     assignments: AssignmentStore,
     api_config: ApiConfig,
+    mqtt_client=None,
+    mqtt_config: MqttConfig = DEFAULT_MQTT_CONFIG,
 ) -> None:
-    """Sync one docked meter and run the onboarding check for its device_id."""
+    """Sync one docked meter, publish new readings to MQTT, and run the onboarding check."""
     try:
-        device_id, model, new_count = await asyncio.to_thread(_sync_device_blocking, path, store)
+        device_id, model, new_readings = await asyncio.to_thread(
+            _sync_device_blocking, path, store
+        )
     except TrueMetrixError as exc:
         _LOGGER.warning("Sync failed for HID path %r: %s", path, exc)
         return
 
-    _LOGGER.info("Synced %s (%s): %d new reading(s)", device_id, model, new_count)
+    _LOGGER.info("Synced %s (%s): %d new reading(s)", device_id, model, len(new_readings))
+
+    if mqtt_client is not None:
+        for reading in new_readings:
+            await publish_reading(mqtt_client, mqtt_config, device_id, model, reading)
+
     await onboarding.check_device(
         device_id, model, onboarding_config, profiles_config, assignments, api_config
     )
@@ -93,6 +104,8 @@ class PollLoop:
         assignments: AssignmentStore,
         api_config: ApiConfig,
         poll_interval_seconds: float,
+        mqtt_client=None,
+        mqtt_config: MqttConfig = DEFAULT_MQTT_CONFIG,
     ) -> None:
         self._store = store
         self._onboarding_config = onboarding_config
@@ -100,6 +113,8 @@ class PollLoop:
         self._assignments = assignments
         self._api_config = api_config
         self._poll_interval_seconds = poll_interval_seconds
+        self._mqtt_client = mqtt_client
+        self._mqtt_config = mqtt_config
         self._seen_paths: set[bytes] = set()
 
     async def _tick(self) -> None:
@@ -114,6 +129,8 @@ class PollLoop:
                 self._profiles_config,
                 self._assignments,
                 self._api_config,
+                self._mqtt_client,
+                self._mqtt_config,
             )
 
         self._seen_paths &= present
