@@ -10,6 +10,7 @@ from trividia_truemetrix_daemon.config import (
     load_mqtt_config,
     load_onboarding_config,
     load_profiles_config,
+    load_report_config,
 )
 
 
@@ -139,6 +140,38 @@ def test_load_profiles_config_rejects_non_integer_threshold(tmp_path):
         "[profile.Alice]\ndevice_ids = Trividia-BLU-11111111\nhigh_threshold_mg_dl = abc\n",
     )
     with pytest.raises(ConfigError, match="high_threshold_mg_dl"):
+        load_profiles_config(path)
+
+
+def test_load_profiles_config_parses_tir_overrides(tmp_path):
+    path = _write(
+        tmp_path,
+        "[profile.Alice]\n"
+        "device_ids = Trividia-BLU-11111111\n"
+        "tir_low_mg_dl = 63\n"
+        "tir_high_mg_dl = 140\n",
+    )
+    alice = load_profiles_config(path).profiles["Alice"]
+    assert alice.tir_low_mg_dl == 63
+    assert alice.tir_high_mg_dl == 140
+
+
+def test_load_profiles_config_defaults_tir_to_none(tmp_path):
+    path = _write(tmp_path, "[profile.Alice]\ndevice_ids = Trividia-BLU-11111111\n")
+    alice = load_profiles_config(path).profiles["Alice"]
+    assert alice.tir_low_mg_dl is None
+    assert alice.tir_high_mg_dl is None
+
+
+def test_load_profiles_config_rejects_tir_low_gte_high(tmp_path):
+    path = _write(
+        tmp_path,
+        "[profile.Alice]\n"
+        "device_ids = Trividia-BLU-11111111\n"
+        "tir_low_mg_dl = 180\n"
+        "tir_high_mg_dl = 70\n",
+    )
+    with pytest.raises(ConfigError, match="tir_low_mg_dl must be less than"):
         load_profiles_config(path)
 
 
@@ -296,3 +329,36 @@ def test_load_mqtt_config_rejects_bad_qos(tmp_path):
     path = _write(tmp_path, "[mqtt]\nhost = broker.example.com\nqos = 5\n")
     with pytest.raises(ConfigError, match="qos"):
         load_mqtt_config(path)
+
+
+def test_load_report_config_defaults(tmp_path):
+    path = _write(tmp_path, "[storage]\ndb_path = /tmp/x.db\n")
+    config = load_report_config(path)
+    assert config.unit == "mg_dl"
+    assert config.layout == "full"
+    assert config.include_time_in_range is False
+    assert config.tir_low_mg_dl == 70
+    assert config.tir_high_mg_dl == 180
+
+
+def test_load_report_config_parses_time_in_range_settings(tmp_path):
+    path = _write(
+        tmp_path,
+        "[report]\ninclude_time_in_range = yes\ntir_low_mg_dl = 63\ntir_high_mg_dl = 140\n",
+    )
+    config = load_report_config(path)
+    assert config.include_time_in_range is True
+    assert config.tir_low_mg_dl == 63
+    assert config.tir_high_mg_dl == 140
+
+
+def test_load_report_config_rejects_tir_low_gte_high(tmp_path):
+    path = _write(tmp_path, "[report]\ntir_low_mg_dl = 180\ntir_high_mg_dl = 70\n")
+    with pytest.raises(ConfigError, match="tir_low_mg_dl must be less than"):
+        load_report_config(path)
+
+
+def test_load_report_config_rejects_bad_unit(tmp_path):
+    path = _write(tmp_path, "[report]\nunit = furlongs\n")
+    with pytest.raises(ConfigError, match="report.unit"):
+        load_report_config(path)

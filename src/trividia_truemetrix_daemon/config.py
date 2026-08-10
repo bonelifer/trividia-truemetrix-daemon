@@ -49,6 +49,12 @@ class ProfileConfig:
     (type 1 vs type 2, pregnancy, age), so unlike a shared scale's single
     weight-swing threshold, one glucose threshold rarely fits everyone in
     a household.
+
+    tir_low_mg_dl/tir_high_mg_dl similarly override report.py's global
+    time-in-range target band for this profile's Time in Range chart --
+    None means "use the global default" (70-180 mg/dL, the common
+    ADA/ATTD-style clinical target, unlike sliding_scale which has no
+    default at all since a dosing table can't be safely guessed).
     """
 
     full_name: str
@@ -58,6 +64,8 @@ class ProfileConfig:
     sliding_scale: tuple[SlidingScaleBand, ...]
     high_threshold_mg_dl: int | None
     low_threshold_mg_dl: int | None
+    tir_low_mg_dl: int | None
+    tir_high_mg_dl: int | None
 
 
 @dataclass
@@ -93,6 +101,12 @@ class ReportConfig:
     #: Requires --profile (or a --multi-meter section resolving to one) --
     #: see dosing.py and report.py's main().
     include_sliding_scale: bool
+    #: Show a Time in Range chart (below/in-range/above, by count). Global
+    #: default target band; a profile's own tir_low_mg_dl/tir_high_mg_dl
+    #: overrides it -- see ProfileConfig.
+    include_time_in_range: bool
+    tir_low_mg_dl: int
+    tir_high_mg_dl: int
 
 
 DEFAULT_REPORT_CONFIG = ReportConfig(
@@ -105,6 +119,9 @@ DEFAULT_REPORT_CONFIG = ReportConfig(
     include_profile=False,
     include_summary=False,
     include_sliding_scale=False,
+    include_time_in_range=False,
+    tir_low_mg_dl=70,
+    tir_high_mg_dl=180,
 )
 
 _UNITS = ("mg_dl", "mmol_l")
@@ -328,6 +345,16 @@ def load_profiles_config(config_path: str) -> ProfilesConfig:
             section.get("low_threshold_mg_dl", "").strip(),
             f"[{section_name}] low_threshold_mg_dl",
         )
+        tir_low = _parse_optional_int(
+            section.get("tir_low_mg_dl", "").strip(), f"[{section_name}] tir_low_mg_dl"
+        )
+        tir_high = _parse_optional_int(
+            section.get("tir_high_mg_dl", "").strip(), f"[{section_name}] tir_high_mg_dl"
+        )
+        if tir_low is not None and tir_high is not None and tir_low >= tir_high:
+            raise ConfigError(
+                f"[{section_name}] tir_low_mg_dl must be less than tir_high_mg_dl"
+            )
 
         profiles[name] = ProfileConfig(
             full_name=section.get("name", "").strip() or name,
@@ -337,6 +364,8 @@ def load_profiles_config(config_path: str) -> ProfilesConfig:
             sliding_scale=sliding_scale,
             high_threshold_mg_dl=high_threshold,
             low_threshold_mg_dl=low_threshold,
+            tir_low_mg_dl=tir_low,
+            tir_high_mg_dl=tir_high,
         )
 
     return ProfilesConfig(profiles=profiles)
@@ -438,6 +467,17 @@ def load_report_config(config_path: str) -> ReportConfig:
     if page_size not in _PAGE_SIZES:
         raise ConfigError(f"report.page_size must be one of {_PAGE_SIZES}, got {page_size!r}")
 
+    try:
+        tir_low = int(report.get("tir_low_mg_dl", str(DEFAULT_REPORT_CONFIG.tir_low_mg_dl)))
+    except ValueError as exc:
+        raise ConfigError("report.tir_low_mg_dl must be an integer") from exc
+    try:
+        tir_high = int(report.get("tir_high_mg_dl", str(DEFAULT_REPORT_CONFIG.tir_high_mg_dl)))
+    except ValueError as exc:
+        raise ConfigError("report.tir_high_mg_dl must be an integer") from exc
+    if tir_low >= tir_high:
+        raise ConfigError("report.tir_low_mg_dl must be less than report.tir_high_mg_dl")
+
     return ReportConfig(
         unit=unit,
         date_format=date_format,
@@ -456,6 +496,11 @@ def load_report_config(config_path: str) -> ReportConfig:
         include_sliding_scale=_parse_bool(
             report.get("include_sliding_scale", "no"), "report.include_sliding_scale"
         ),
+        include_time_in_range=_parse_bool(
+            report.get("include_time_in_range", "no"), "report.include_time_in_range"
+        ),
+        tir_low_mg_dl=tir_low,
+        tir_high_mg_dl=tir_high,
     )
 
 

@@ -10,6 +10,8 @@ from datetime import datetime, timedelta, timezone
 from xml.sax.saxutils import escape
 
 from reportlab.graphics.charts.linecharts import HorizontalLineChart
+from reportlab.graphics.charts.piecharts import Pie
+from reportlab.graphics.charts.legends import Legend
 from reportlab.graphics.shapes import Drawing, String
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, letter
@@ -437,6 +439,82 @@ def _summary_line(rows: list[ReportRow], report_config: ReportConfig) -> str | N
     )
 
 
+#: Colors for the Time in Range chart: below target, in target, above target.
+_TIR_COLORS = (colors.HexColor("#c0392b"), colors.HexColor("#27ae60"), colors.HexColor("#e67e22"))
+
+
+def _time_in_range_counts(rows: list[ReportRow], low: int, high: int) -> tuple[int, int, int]:
+    """Count readings below, within, and above [low, high] (inclusive), by value_mg_dl."""
+    below = sum(1 for row in rows if row.value_mg_dl < low)
+    above = sum(1 for row in rows if row.value_mg_dl > high)
+    in_range = len(rows) - below - above
+    return below, in_range, above
+
+
+def _build_time_in_range_chart(below: int, in_range: int, above: int) -> Drawing:
+    """Render a pie chart of below/in-range/above counts, with a percentage legend.
+
+    Zero-count categories are omitted from the pie itself (a 0-value slice
+    renders oddly) but still appear in the legend at 0%, so the three
+    categories are always listed even when one never occurred.
+    """
+    total = below + in_range + above
+    labels = ["Below range", "In range", "Above range"]
+    counts = [below, in_range, above]
+
+    drawing = Drawing(400, 160)
+    pie = Pie()
+    pie.x, pie.y = 20, 5
+    pie.width = pie.height = 150
+    pie.data = [c for c in counts if c > 0] or [1]
+    pie.slices.strokeWidth = 0.5
+    color_cycle = [color for count, color in zip(counts, _TIR_COLORS) if count > 0] or [
+        colors.lightgrey
+    ]
+    for i, color in enumerate(color_cycle):
+        pie.slices[i].fillColor = color
+    drawing.add(pie)
+
+    legend = Legend()
+    legend.x, legend.y = 220, 130
+    legend.dx = 8
+    legend.dy = 8
+    legend.fontSize = 8
+    legend.alignment = "right"
+    legend.colorNamePairs = [
+        (color, f"{label}: {count} ({count / total:.0%})")
+        for label, count, color in zip(labels, counts, _TIR_COLORS)
+    ]
+    drawing.add(legend)
+    return drawing
+
+
+def _resolve_tir_range(
+    report_config: ReportConfig, profile: ProfileConfig | None
+) -> tuple[int, int]:
+    """Effective (low, high) target band: profile's own override, else the global default."""
+    low, high = report_config.tir_low_mg_dl, report_config.tir_high_mg_dl
+    if profile is not None:
+        if profile.tir_low_mg_dl is not None:
+            low = profile.tir_low_mg_dl
+        if profile.tir_high_mg_dl is not None:
+            high = profile.tir_high_mg_dl
+    return low, high
+
+
+def _time_in_range_elements(rows: list[ReportRow], low: int, high: int, styles) -> list:
+    """"Time in Range" heading + pie chart, or a note if there's nothing to chart."""
+    if not rows:
+        return []
+    below, in_range, above = _time_in_range_counts(rows, low, high)
+    return [
+        Paragraph(f"Time in Range ({low}-{high} mg/dL)", styles["Heading2"]),
+        Spacer(1, 0.05 * inch),
+        _build_time_in_range_chart(below, in_range, above),
+        Spacer(1, 0.15 * inch),
+    ]
+
+
 def _meter_summary_elements(rows: list[ReportRow], styles) -> list:
     """One "Meter: <device_id> (<model>)" line per distinct meter in rows.
 
@@ -524,6 +602,9 @@ def build_pdf(
     when report_config.include_sliding_scale) adds a reference table of
     every configured band, and -- "full" layout only -- per-reading
     Dose/Note columns in the main table; see _full_columns's docstring.
+    report_config.include_time_in_range adds a below/in-range/above pie
+    chart, using profile's own tir_low_mg_dl/tir_high_mg_dl if set, else
+    report_config's global default (70-180 mg/dL).
     """
     styles = getSampleStyleSheet()
     doc = SimpleDocTemplate(output_path, pagesize=_PAGE_SIZES[report_config.page_size])
@@ -544,6 +625,10 @@ def build_pdf(
         if summary:
             elements.append(Paragraph(summary, styles["Normal"]))
     elements.append(Spacer(1, 0.25 * inch))
+
+    if report_config.include_time_in_range:
+        tir_low, tir_high = _resolve_tir_range(report_config, profile)
+        elements.extend(_time_in_range_elements(rows, tir_low, tir_high, styles))
 
     if report_config.include_sliding_scale:
         elements.extend(_sliding_scale_elements(sliding_scale, styles))
@@ -570,10 +655,10 @@ def build_multi_meter_pdf(
 ) -> None:
     """Render one PDF with a separate section (own table/chart) per meter.
 
-    Each section's owning profile (and thus its email/notes and
-    sliding_scale) is resolved independently from that section's
-    rows[0].profile -- one household's meters can belong to different
-    people, each with their own (or no) configured details/dosing table.
+    Each section's owning profile (and thus its email/notes, sliding_scale,
+    and time-in-range target band) is resolved independently from that
+    section's rows[0].profile -- one household's meters can belong to
+    different people, each with their own (or no) configured details.
     """
     total_rows = sum(len(rows) for _, rows in sections)
     styles = getSampleStyleSheet()
@@ -620,6 +705,10 @@ def build_multi_meter_pdf(
             if summary:
                 elements.append(Paragraph(summary, styles["Normal"]))
                 elements.append(Spacer(1, 0.1 * inch))
+
+        if report_config.include_time_in_range:
+            tir_low, tir_high = _resolve_tir_range(report_config, section_profile)
+            elements.extend(_time_in_range_elements(rows, tir_low, tir_high, styles))
 
         if report_config.include_sliding_scale:
             elements.extend(_sliding_scale_elements(section_sliding_scale, styles))

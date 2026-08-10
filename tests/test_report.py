@@ -8,6 +8,8 @@ from trividia_truemetrix_daemon.assignments import AssignmentStore
 from trividia_truemetrix_daemon.config import DEFAULT_REPORT_CONFIG, ProfileConfig, ProfilesConfig
 from trividia_truemetrix_daemon.dosing import parse_sliding_scale
 from trividia_truemetrix_daemon.report import (
+    ReportRow,
+    _time_in_range_counts,
     build_csv,
     build_multi_meter_pdf,
     build_pdf,
@@ -45,6 +47,7 @@ def _profiles() -> ProfilesConfig:
                 full_name="Alice Smith", email="", notes="", sliding_scale=(),
                 device_ids=("Trividia-BLU-11111111",),
                 high_threshold_mg_dl=None, low_threshold_mg_dl=None,
+                tir_low_mg_dl=None, tir_high_mg_dl=None,
             )
         }
     )
@@ -260,6 +263,7 @@ def test_build_multi_meter_pdf_resolves_sliding_scale_per_section(tmp_path):
                 device_ids=("Trividia-BLU-11111111",),
                 sliding_scale=parse_sliding_scale("0:500:2", "test"),
                 high_threshold_mg_dl=None, low_threshold_mg_dl=None,
+                tir_low_mg_dl=None, tir_high_mg_dl=None,
             )
         }
     )
@@ -283,6 +287,7 @@ def test_build_pdf_with_profile_header_produces_nonempty_file(tmp_path):
         device_ids=("Trividia-BLU-11111111",),
         sliding_scale=parse_sliding_scale("0:500:2:in range", "test"),
         high_threshold_mg_dl=None, low_threshold_mg_dl=None,
+        tir_low_mg_dl=None, tir_high_mg_dl=None,
     )
 
     out_path = str(tmp_path / "report.pdf")
@@ -290,3 +295,88 @@ def test_build_pdf_with_profile_header_produces_nonempty_file(tmp_path):
         rows, out_path, _sliding_scale_report_config(), profile.sliding_scale, profile
     )
     assert tmp_path.joinpath("report.pdf").stat().st_size > 0
+
+
+def _tir_report_config(**overrides):
+    return replace(DEFAULT_REPORT_CONFIG, include_time_in_range=True, **overrides)
+
+
+def test_time_in_range_counts_splits_below_in_above(tmp_path):
+    db_path = str(tmp_path / "readings.db")
+    _seed(db_path)
+    assignments = AssignmentStore(str(tmp_path / "assignments.json"))
+    rows = fetch_rows(db_path, _profiles(), assignments, "Trividia-BLU-11111111", None, None)
+
+    # Alice's readings are 95 (in 70-180) and 210 (above 180).
+    below, in_range, above = _time_in_range_counts(rows, 70, 180)
+    assert (below, in_range, above) == (0, 1, 1)
+
+
+def test_time_in_range_counts_boundaries_are_inclusive():
+    now = datetime.datetime.now()
+    rows = [
+        ReportRow(now, "d", "m", 70, None, None),
+        ReportRow(now, "d", "m", 180, None, None),
+        ReportRow(now, "d", "m", 69, None, None),
+        ReportRow(now, "d", "m", 181, None, None),
+    ]
+    below, in_range, above = _time_in_range_counts(rows, 70, 180)
+    assert (below, in_range, above) == (1, 2, 1)
+
+
+def test_time_in_range_counts_empty_rows():
+    assert _time_in_range_counts([], 70, 180) == (0, 0, 0)
+
+
+def test_build_pdf_with_time_in_range_produces_nonempty_file(tmp_path):
+    db_path = str(tmp_path / "readings.db")
+    _seed(db_path)
+    assignments = AssignmentStore(str(tmp_path / "assignments.json"))
+    rows = fetch_rows(db_path, _profiles(), assignments, "Trividia-BLU-11111111", None, None)
+
+    out_path = str(tmp_path / "report.pdf")
+    build_pdf(rows, out_path, _tir_report_config())
+    assert tmp_path.joinpath("report.pdf").stat().st_size > 0
+
+
+def test_build_pdf_time_in_range_uses_profile_override(tmp_path):
+    db_path = str(tmp_path / "readings.db")
+    _seed(db_path)
+    assignments = AssignmentStore(str(tmp_path / "assignments.json"))
+    rows = fetch_rows(db_path, _profiles(), assignments, "Trividia-BLU-11111111", None, None)
+    profile = ProfileConfig(
+        full_name="Alice", email="", notes="", device_ids=("Trividia-BLU-11111111",),
+        sliding_scale=(), high_threshold_mg_dl=None, low_threshold_mg_dl=None,
+        tir_low_mg_dl=63, tir_high_mg_dl=140,
+    )
+
+    out_path = str(tmp_path / "report.pdf")
+    # With the profile's own 63-140 target, both 95 and 210 differ from the
+    # 70-180 default result -- this just checks the override path doesn't
+    # error; exact chart contents aren't asserted (PDF internals).
+    build_pdf(rows, out_path, _tir_report_config(), profile=profile)
+    assert tmp_path.joinpath("report.pdf").stat().st_size > 0
+
+
+def test_build_multi_meter_pdf_with_time_in_range_resolves_per_section(tmp_path):
+    db_path = str(tmp_path / "readings.db")
+    _seed(db_path)
+    assignments = AssignmentStore(str(tmp_path / "assignments.json"))
+    profiles = ProfilesConfig(
+        profiles={
+            "Alice": ProfileConfig(
+                full_name="Alice", email="", notes="",
+                device_ids=("Trividia-BLU-11111111",), sliding_scale=(),
+                high_threshold_mg_dl=None, low_threshold_mg_dl=None,
+                tir_low_mg_dl=None, tir_high_mg_dl=None,
+            )
+        }
+    )
+    device_ids = fetch_device_ids(db_path, None, None)
+    sections = [
+        (d, fetch_rows(db_path, profiles, assignments, d, None, None)) for d in device_ids
+    ]
+
+    out_path = str(tmp_path / "multi.pdf")
+    build_multi_meter_pdf(sections, out_path, _tir_report_config(), profiles)
+    assert tmp_path.joinpath("multi.pdf").stat().st_size > 0

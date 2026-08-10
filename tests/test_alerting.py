@@ -188,6 +188,7 @@ def test_check_alerts_uses_profile_threshold_override(tmp_path):
             "Alice": ProfileConfig(
                 full_name="Alice", email="", notes="", device_ids=("dev-1",),
                 sliding_scale=(), high_threshold_mg_dl=200, low_threshold_mg_dl=None,
+                tir_low_mg_dl=None, tir_high_mg_dl=None,
             )
         }
     )
@@ -209,6 +210,7 @@ def test_check_alerts_profile_override_can_disable_a_global_threshold(tmp_path):
             "Alice": ProfileConfig(
                 full_name="Alice", email="", notes="", device_ids=("dev-1",),
                 sliding_scale=(), high_threshold_mg_dl=0, low_threshold_mg_dl=None,
+                tir_low_mg_dl=None, tir_high_mg_dl=None,
             )
         }
     )

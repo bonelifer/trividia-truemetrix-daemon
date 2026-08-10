@@ -120,6 +120,7 @@ sudo "$EDITOR" /etc/trividia-truemetrix-daemon/config.ini
 | `profile.<name>` | `notes` | Optional free-text note (e.g. diagnosis, insulin type). Shown in the PDF report header (after Meter) whenever `--profile`/`?profile=` selects this profile; not shown in CSV. |
 | `profile.<name>` | `sliding_scale` | Optional dosing table, one band per line: `low:high:dose[:label]` (`low`/`high` blank = unbounded on that side). See [Reports](#reports) -- **this must come from the person's own doctor; this tool never invents, validates, or adjusts these numbers.** Overlapping bands are rejected at load (an ambiguous table is a safety issue). |
 | `profile.<name>` | `high_threshold_mg_dl` / `low_threshold_mg_dl` | Optional, overrides `[alerting]`'s global thresholds for this profile's meter(s). Blank = use the global default. See [Alerting](#alerting). |
+| `profile.<name>` | `tir_low_mg_dl` / `tir_high_mg_dl` | Optional, overrides `[report]`'s global Time in Range target band for this profile's meter(s). Blank = use the global default (70-180 mg/dL). See [Reports](#reports). |
 | `onboarding` | `enabled` | Fire the new-device onboarding notification: `yes` or `no`. Defaults to `no`. |
 | `onboarding` | `ntfy_url` / `ntfy_token` | ntfy topic for the interactive assignment prompt. Requires `[api] enabled = yes`. |
 | `onboarding` | `api_base_url` | Where the API is reachable, for ntfy's action buttons to call back into. Only used when `[api]` is enabled. |
@@ -137,6 +138,8 @@ sudo "$EDITOR" /etc/trividia-truemetrix-daemon/config.ini
 | `report` | `include_profile` | Show the Profile column in the `full` layout: `yes` or `no`. Needs `--config` (profile membership isn't in the database). Ignored in PDF whenever the owner is already named elsewhere -- `--profile`'s report (named in the Patient header) or a `--multi-meter` section (named in its heading); only applies to a PDF spanning more than one owner with neither, or to CSV always. |
 | `report` | `include_summary` | Print a min/max/average/high-count/low-count summary line below the title: `yes` or `no`. PDF only. |
 | `report` | `include_sliding_scale` | Show Dose/Note columns, looked up per reading from a profile's `sliding_scale`: `yes` or `no`. Requires `--profile` (or resolves per section with `--multi-meter`) -- see [Reports](#reports) and its disclaimer. |
+| `report` | `include_time_in_range` | Show a below/in-range/above pie chart: `yes` or `no`. Works without `--profile` too, using the global target band; a profile's own `tir_low_mg_dl`/`tir_high_mg_dl` overrides it (resolves per section with `--multi-meter`). |
+| `report` | `tir_low_mg_dl` / `tir_high_mg_dl` | Global default Time in Range target band, mg/dL. Defaults to `70`/`180` (a common clinical target range) -- unlike `sliding_scale`, this has a sensible default since it's a well-known public-health guideline, not an individualized prescription. |
 | `alerting` | `enabled` | Notify via Apprise on threshold/staleness conditions: `yes` or `no`. Defaults to `no`. |
 | `alerting` | `apprise_urls` | Comma-separated Apprise service URLs. Required if `enabled = yes`. |
 | `alerting` | `high_threshold_mg_dl` / `low_threshold_mg_dl` | Global default thresholds, mg/dL. `0` disables that check. Overridable per profile -- see above. |
@@ -448,6 +451,28 @@ The layout, which columns appear, the unit, and the date/time format are
 controlled by the `[report]` section of the config file (see the config
 table above). `--db` always uses the defaults (`full` layout, mg/dL,
 world date format, every optional column).
+
+### Time in Range
+
+Set `report.include_time_in_range = yes` for a below/in-range/above pie
+chart (with counts and percentages), independent of layout:
+
+```ini
+[report]
+include_time_in_range = yes
+```
+
+```bash
+trividia-truemetrix-report --config /etc/trividia-truemetrix-daemon/config.ini --profile Alice --output alice.pdf
+```
+
+Unlike sliding scale, this works without `--profile` too (a plain report
+uses `report.tir_low_mg_dl`/`tir_high_mg_dl`, defaulting to 70-180 mg/dL,
+a common clinical target range and reasonable enough to ship as a default
+-- unlike a dosing table, which can't be safely guessed). A profile's own
+`tir_low_mg_dl`/`tir_high_mg_dl` overrides the global default for that
+profile's report; with `--multi-meter`, each section resolves its target
+band independently, the same way sliding scale does.
 
 ### Sliding scale (insulin dosing)
 
