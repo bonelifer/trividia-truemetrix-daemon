@@ -21,6 +21,15 @@
   fixes a bug in a pattern this daemon copied verbatim, it's worth
   checking.
 
+- **Tidepool's uploader repo** -- https://github.com/tidepool-org/uploader
+  -- the true origin of the protocol this whole stack is built on. This
+  daemon doesn't depend on it directly (trividia-truemetrix-hid does, and
+  tracks it in detail in its own `CLAUDE.md` -- exact file, last-known
+  commit, etc.), but it's worth knowing it's there at the root: if
+  Trividia/Tidepool ever add real ketone support, fix a device-time bug,
+  or add a new TRUE METRIX variant, it surfaces here two hops later, via
+  a `trividia-truemetrix-hid` update.
+
 ## Verification status
 
 Sync/report/alerting/MQTT/API logic is unit-tested (116 tests as of this
