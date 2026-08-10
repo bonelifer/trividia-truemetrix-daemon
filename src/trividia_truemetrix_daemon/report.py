@@ -22,6 +22,7 @@ from .assignments import AssignmentStore, resolve_profile
 from .config import (
     ConfigError,
     DEFAULT_REPORT_CONFIG,
+    ProfileConfig,
     ProfilesConfig,
     ReportConfig,
     load_config,
@@ -228,6 +229,8 @@ def _full_columns(
     rows: list[ReportRow],
     report_config: ReportConfig,
     sliding_scale: tuple[SlidingScaleBand, ...] = (),
+    include_device_model_columns: bool = True,
+    include_profile_column: bool = True,
 ) -> _FullColumns:
     """Build the header and raw values for whichever columns are enabled.
 
@@ -235,17 +238,30 @@ def _full_columns(
     adds Dose/Note columns from that one profile's configured bands -- see
     dosing.py. This is a display lookup of a table the caller already
     configured, not a computed/generated recommendation.
+
+    include_device_model_columns and include_profile_column are False for
+    the PDF table (see _build_full_table): with Dose/Note columns already
+    in the mix, repeating a long device_id -- or a profile name already
+    named once in the header/section heading -- on every row pushed rows
+    off the page edge. PDF instead shows meter identity once in the header
+    (see _meter_summary_elements) and the owning profile once in the
+    Patient header or section heading; report_config.include_device_id/
+    include_model/include_profile only govern CSV, which has no
+    page-width constraint and no such header to fall back on.
     """
     unit_factor, unit_label = _UNIT_CONVERSIONS[report_config.unit]
     value_header = f"Glucose ({unit_label})"
     show_dose = report_config.include_sliding_scale and bool(sliding_scale)
+    show_device_id = include_device_model_columns and report_config.include_device_id
+    show_model = include_device_model_columns and report_config.include_model
+    show_profile = include_profile_column and report_config.include_profile
 
     header = ["Date/Time"]
-    if report_config.include_device_id:
+    if show_device_id:
         header.append("Device ID")
-    if report_config.include_model:
+    if show_model:
         header.append("Model")
-    if report_config.include_profile:
+    if show_profile:
         header.append("Profile")
     header.append(value_header)
     header.append("Flag")
@@ -256,11 +272,11 @@ def _full_columns(
     data: list[list[object]] = []
     for row in rows:
         line: list[object] = [_format_datetime(row.device_time, report_config.date_format)]
-        if report_config.include_device_id:
+        if show_device_id:
             line.append(row.device_id)
-        if report_config.include_model:
+        if show_model:
             line.append(row.model)
-        if report_config.include_profile:
+        if show_profile:
             line.append(row.profile)
         line.append(_format_value(row.value_mg_dl, unit_factor))
         line.append(row.out_of_range.upper() if row.out_of_range else "-")
@@ -277,12 +293,16 @@ def _build_full_table(
     rows: list[ReportRow],
     report_config: ReportConfig,
     sliding_scale: tuple[SlidingScaleBand, ...] = (),
+    include_profile_column: bool = True,
 ) -> Table:
-    columns = _full_columns(rows, report_config, sliding_scale)
+    columns = _full_columns(
+        rows, report_config, sliding_scale,
+        include_device_model_columns=False, include_profile_column=include_profile_column,
+    )
     header = columns.header
     _, unit_label = _UNIT_CONVERSIONS[report_config.unit]
     value_idx = header.index(f"Glucose ({unit_label})")
-    profile_idx = header.index("Profile") if report_config.include_profile else None
+    profile_idx = header.index("Profile") if "Profile" in header else None
     dose_idx = header.index("Dose (units)") if "Dose (units)" in header else None
 
     data = [header]
@@ -309,7 +329,12 @@ def build_csv(
     report_config: ReportConfig = DEFAULT_REPORT_CONFIG,
     sliding_scale: tuple[SlidingScaleBand, ...] = (),
 ) -> None:
-    """Write reading rows as CSV. Layout/page_size/summary are PDF-only and don't apply."""
+    """Write reading rows as CSV. Layout/page_size/summary are PDF-only and don't apply.
+
+    Unlike the PDF table, Device ID/Model stay as per-row columns here,
+    governed by report_config.include_device_id/include_model -- CSV has
+    no page-width constraint forcing them into a header instead.
+    """
     columns = _full_columns(rows, report_config, sliding_scale)
     header = columns.header
     _, unit_label = _UNIT_CONVERSIONS[report_config.unit]
@@ -412,16 +437,93 @@ def _summary_line(rows: list[ReportRow], report_config: ReportConfig) -> str | N
     )
 
 
+def _meter_summary_elements(rows: list[ReportRow], styles) -> list:
+    """One "Meter: <device_id> (<model>)" line per distinct meter in rows.
+
+    Replaces the per-row Device ID/Model columns in the PDF table (still
+    present in CSV) -- device_id strings are long, and repeating them on
+    every row was, combined with Dose/Note columns, pushing the table off
+    the page edge. Shown regardless of whether a profile was given.
+    """
+    seen: list[tuple[str, str]] = []
+    for row in rows:
+        pair = (row.device_id, row.model)
+        if pair not in seen:
+            seen.append(pair)
+    return [
+        Paragraph(f"Meter: {escape(device_id)} ({escape(model)})", styles["Normal"])
+        for device_id, model in seen
+    ]
+
+
+def _profile_info_elements(profile: ProfileConfig, rows: list[ReportRow], styles) -> list:
+    """Header lines identifying whose report this is, and which meter(s) it's from.
+
+    Order: Patient, Email, Meter, Notes. Unconditional if profile is given
+    (unlike sliding_scale, there's no include_* toggle for this -- matches
+    etekcity-scale-daemon's patient name/email header, always shown when a
+    profile is selected). See _meter_summary_elements for why meter
+    identity lives here rather than as per-row table columns.
+    """
+    elements = [Paragraph(f"Patient: {escape(profile.full_name)}", styles["Normal"])]
+    if profile.email:
+        elements.append(Paragraph(f"Email: {escape(profile.email)}", styles["Normal"]))
+    elements.extend(_meter_summary_elements(rows, styles))
+    if profile.notes:
+        elements.append(Paragraph(f"Notes: {escape(profile.notes)}", styles["Normal"]))
+    return elements
+
+
+def _sliding_scale_range_label(band: SlidingScaleBand) -> str:
+    if band.low_mg_dl is None:
+        return f"≤{band.high_mg_dl}"
+    if band.high_mg_dl is None:
+        return f"≥{band.low_mg_dl}"
+    return f"{band.low_mg_dl}-{band.high_mg_dl}"
+
+
+def _build_sliding_scale_table(sliding_scale: tuple[SlidingScaleBand, ...]) -> Table:
+    """Render the profile's configured dosing bands as their own reference table.
+
+    Distinct from the per-reading Dose/Note columns _full_columns adds to
+    the main table -- this lists every configured band once, regardless of
+    whether any reading in this report actually falls in it.
+    """
+    data = [["Glucose Range (mg/dL)", "Dose (units)", "Note"]]
+    for band in sliding_scale:
+        data.append(
+            [_sliding_scale_range_label(band), f"{band.dose_units:g}", band.label or "-"]
+        )
+    table = Table(data, colWidths=[150, 90, 220])
+    table.setStyle(_table_style([1]))
+    return table
+
+
+def _sliding_scale_elements(sliding_scale: tuple[SlidingScaleBand, ...], styles) -> list:
+    if not sliding_scale:
+        return []
+    return [
+        Paragraph("Sliding Scale (Reference)", styles["Heading2"]),
+        Spacer(1, 0.05 * inch),
+        _build_sliding_scale_table(sliding_scale),
+        Spacer(1, 0.15 * inch),
+    ]
+
+
 def build_pdf(
     rows: list[ReportRow],
     output_path: str,
     report_config: ReportConfig = DEFAULT_REPORT_CONFIG,
     sliding_scale: tuple[SlidingScaleBand, ...] = (),
+    profile: ProfileConfig | None = None,
 ) -> None:
     """Render reading rows as a table (or chart) in a PDF file.
 
-    sliding_scale is used only by the "full" layout -- see
-    _full_columns's docstring for what it does and doesn't mean.
+    profile, if given, adds a Patient/Email/Notes header -- unconditional,
+    not gated by report_config. sliding_scale (typically profile's own,
+    when report_config.include_sliding_scale) adds a reference table of
+    every configured band, and -- "full" layout only -- per-reading
+    Dose/Note columns in the main table; see _full_columns's docstring.
     """
     styles = getSampleStyleSheet()
     doc = SimpleDocTemplate(output_path, pagesize=_PAGE_SIZES[report_config.page_size])
@@ -433,18 +535,29 @@ def build_pdf(
             styles["Normal"],
         ),
     ]
+    if profile is not None:
+        elements.extend(_profile_info_elements(profile, rows, styles))
+    else:
+        elements.extend(_meter_summary_elements(rows, styles))
     if report_config.include_summary:
         summary = _summary_line(rows, report_config)
         if summary:
             elements.append(Paragraph(summary, styles["Normal"]))
     elements.append(Spacer(1, 0.25 * inch))
 
+    if report_config.include_sliding_scale:
+        elements.extend(_sliding_scale_elements(sliding_scale, styles))
+
     if report_config.layout == "simple":
         elements.append(_build_simple_table(rows, report_config))
     elif report_config.layout == "chart":
         elements.append(_build_chart(rows, report_config))
     else:
-        elements.append(_build_full_table(rows, report_config, sliding_scale))
+        elements.append(
+            _build_full_table(
+                rows, report_config, sliding_scale, include_profile_column=profile is None
+            )
+        )
 
     doc.build(elements)
 
@@ -457,9 +570,10 @@ def build_multi_meter_pdf(
 ) -> None:
     """Render one PDF with a separate section (own table/chart) per meter.
 
-    Each section's sliding_scale is resolved independently from that
-    section's rows[0].profile -- one household's meters can belong to
-    different people, each with their own (or no) configured dosing table.
+    Each section's owning profile (and thus its email/notes and
+    sliding_scale) is resolved independently from that section's
+    rows[0].profile -- one household's meters can belong to different
+    people, each with their own (or no) configured details/dosing table.
     """
     total_rows = sum(len(rows) for _, rows in sections)
     styles = getSampleStyleSheet()
@@ -484,23 +598,45 @@ def build_multi_meter_pdf(
                 styles["Heading2"],
             )
         )
+
+        section_profile: ProfileConfig | None = None
+        if profiles_config is not None:
+            section_profile = profiles_config.profiles.get(rows[0].profile)
+        section_sliding_scale = section_profile.sliding_scale if section_profile else ()
+
+        if section_profile is not None and (section_profile.email or section_profile.notes):
+            if section_profile.email:
+                elements.append(
+                    Paragraph(f"Email: {escape(section_profile.email)}", styles["Normal"])
+                )
+            if section_profile.notes:
+                elements.append(
+                    Paragraph(f"Notes: {escape(section_profile.notes)}", styles["Normal"])
+                )
         elements.append(Spacer(1, 0.1 * inch))
+
         if report_config.include_summary:
             summary = _summary_line(rows, report_config)
             if summary:
                 elements.append(Paragraph(summary, styles["Normal"]))
                 elements.append(Spacer(1, 0.1 * inch))
 
-        section_sliding_scale: tuple[SlidingScaleBand, ...] = ()
-        if profiles_config is not None and rows[0].profile in profiles_config.profiles:
-            section_sliding_scale = profiles_config.profiles[rows[0].profile].sliding_scale
+        if report_config.include_sliding_scale:
+            elements.extend(_sliding_scale_elements(section_sliding_scale, styles))
 
         if report_config.layout == "simple":
             elements.append(_build_simple_table(rows, report_config))
         elif report_config.layout == "chart":
             elements.append(_build_chart(rows, report_config))
         else:
-            elements.append(_build_full_table(rows, report_config, section_sliding_scale))
+            # Every row in a section shares one device_id, so it shares one
+            # owning profile too -- already named in the section heading
+            # above, making a per-row Profile column redundant here too.
+            elements.append(
+                _build_full_table(
+                    rows, report_config, section_sliding_scale, include_profile_column=False
+                )
+            )
 
     doc.build(elements)
 
@@ -601,18 +737,20 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     sliding_scale: tuple = ()
-    if report_config.include_sliding_scale:
-        if not args.profile:
-            print(
-                "Error: report.include_sliding_scale is enabled but no --profile was "
-                "given -- the dosing table comes from that profile's "
-                "[profile.<name>] section"
-            )
-            return 1
+    profile_obj = None
+    if args.profile:
         if args.profile not in profiles_config.profiles:
             print(f"Error: no [profile.{args.profile}] section in the config")
             return 1
-        sliding_scale = profiles_config.profiles[args.profile].sliding_scale
+        profile_obj = profiles_config.profiles[args.profile]
+        sliding_scale = profile_obj.sliding_scale
+    elif report_config.include_sliding_scale:
+        print(
+            "Error: report.include_sliding_scale is enabled but no --profile was "
+            "given -- the dosing table comes from that profile's "
+            "[profile.<name>] section"
+        )
+        return 1
 
     rows = fetch_rows(
         db_path, profiles_config, assignments, args.device_id, start, end, args.profile
@@ -624,7 +762,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.format == "csv":
         build_csv(rows, output, report_config, sliding_scale)
     else:
-        build_pdf(rows, output, report_config, sliding_scale)
+        build_pdf(rows, output, report_config, sliding_scale, profile_obj)
     print(f"Wrote {len(rows)} reading(s) to {output}")
     return 0
 

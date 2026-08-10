@@ -117,7 +117,7 @@ sudo "$EDITOR" /etc/trividia-truemetrix-daemon/config.ini
 | `profile.<name>` | `device_ids` | Comma-separated `device_id`s (e.g. `Trividia-BLU-12345678`) this person's meter(s) report as. Required; each device_id may belong to only one profile -- a config with two profiles claiming the same one fails to load. |
 | `profile.<name>` | `name` | Optional full display name (e.g. `Alice Smith`). Defaults to the section id (`<name>` in `[profile.<name>]`) if left blank. The section id itself -- not this field -- is what's used for matching, action-button labels, and `?profile=`. |
 | `profile.<name>` | `email` | Optional, unused for now (no report header uses it yet). |
-| `profile.<name>` | `notes` | Optional free-text note (e.g. diagnosis, insulin type). Not shown in reports; for your own reference in the config file. |
+| `profile.<name>` | `notes` | Optional free-text note (e.g. diagnosis, insulin type). Shown in the PDF report header (after Meter) whenever `--profile`/`?profile=` selects this profile; not shown in CSV. |
 | `profile.<name>` | `sliding_scale` | Optional dosing table, one band per line: `low:high:dose[:label]` (`low`/`high` blank = unbounded on that side). See [Reports](#reports) -- **this must come from the person's own doctor; this tool never invents, validates, or adjusts these numbers.** Overlapping bands are rejected at load (an ambiguous table is a safety issue). |
 | `profile.<name>` | `high_threshold_mg_dl` / `low_threshold_mg_dl` | Optional, overrides `[alerting]`'s global thresholds for this profile's meter(s). Blank = use the global default. See [Alerting](#alerting). |
 | `onboarding` | `enabled` | Fire the new-device onboarding notification: `yes` or `no`. Defaults to `no`. |
@@ -133,7 +133,8 @@ sudo "$EDITOR" /etc/trividia-truemetrix-daemon/config.ini
 | `report` | `date_format` | `us` (MM/DD/YYYY, 12-hour) or `world` (DD/MM/YYYY, 24-hour). |
 | `report` | `layout` | `full` (one row per reading), `simple` (date/glucose only, side-by-side columns), or `chart` (a line chart of glucose over time). PDF only. |
 | `report` | `page_size` | `letter` or `a4`. PDF only. |
-| `report` | `include_device_id` / `include_model` / `include_profile` | Show these columns in the `full` layout: `yes` or `no`. `include_profile` needs `--config` (profile membership isn't in the database). |
+| `report` | `include_device_id` / `include_model` | Show these columns: `yes` or `no`. **CSV only** -- PDF always shows meter identity once in the header instead (a `Meter: <device_id> (<model>)` line), not as per-row columns, to keep the table narrow enough to fit the page. |
+| `report` | `include_profile` | Show the Profile column in the `full` layout: `yes` or `no`. Needs `--config` (profile membership isn't in the database). Ignored in PDF whenever the owner is already named elsewhere -- `--profile`'s report (named in the Patient header) or a `--multi-meter` section (named in its heading); only applies to a PDF spanning more than one owner with neither, or to CSV always. |
 | `report` | `include_summary` | Print a min/max/average/high-count/low-count summary line below the title: `yes` or `no`. PDF only. |
 | `report` | `include_sliding_scale` | Show Dose/Note columns, looked up per reading from a profile's `sliding_scale`: `yes` or `no`. Requires `--profile` (or resolves per section with `--multi-meter`) -- see [Reports](#reports) and its disclaimer. |
 | `alerting` | `enabled` | Notify via Apprise on threshold/staleness conditions: `yes` or `no`. Defaults to `no`. |
@@ -472,13 +473,21 @@ trividia-truemetrix-report --config /etc/trividia-truemetrix-daemon/config.ini -
 
 With `--multi-meter`, each meter's section resolves its own profile's
 sliding scale independently (see
-[combined-multi-meter-sliding-scale.pdf](samples/combined-multi-meter-sliding-scale.pdf)):
+[combined/multi-meter-sliding-scale.pdf](samples/combined/multi-meter-sliding-scale.pdf)):
 a profile with no `sliding_scale` configured just shows no Dose/Note
 columns for its section, with no fallback to another profile's table.
 
-See [samples/](samples/) for a rendered PDF of every layout/unit/date-format
-combination (all single-profile, the realistic case), plus the sliding-scale
-examples and the secondary household/combined samples.
+Device ID and Model are deliberately shown once in the header (a `Meter:
+<device_id> (<model>)` line, right under Email) rather than as per-row
+table columns in PDF output -- with Dose/Note columns already in the mix,
+repeating a long device_id on every row was pushing the table off the
+page edge. `report.include_device_id`/`include_model` still work, but
+only affect `--format csv`, which has no page-width constraint.
+
+See [samples/](samples/single/) for a rendered PDF of every
+layout/unit/date-format combination (all single-profile, the realistic
+case, in [samples/single/](samples/single/)), plus the secondary
+household/combined samples in [samples/combined/](samples/combined/).
 
 ## Database schema
 
