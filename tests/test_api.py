@@ -44,6 +44,7 @@ def _profiles() -> ProfilesConfig:
                 device_ids=("Trividia-BLU-11111111",),
                 sliding_scale=parse_sliding_scale("0:500:2", "test"),
                 high_threshold_mg_dl=None, low_threshold_mg_dl=None,
+                tir_low_mg_dl=None, tir_high_mg_dl=None,
             )
         }
     )
