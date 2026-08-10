@@ -134,7 +134,7 @@ sudo "$EDITOR" /etc/trividia-truemetrix-daemon/config.ini
 | `report` | `layout` | `full` (one row per reading), `simple` (date/glucose only, side-by-side columns), or `chart` (a line chart of glucose over time). PDF only. |
 | `report` | `page_size` | `letter` or `a4`. PDF only. |
 | `report` | `include_device_id` / `include_model` | Show these columns: `yes` or `no`. **CSV only** -- PDF always shows meter identity once in the header instead (a `Meter: <device_id> (<model>)` line), not as per-row columns, to keep the table narrow enough to fit the page. |
-| `report` | `include_profile` | Show the Profile column in the `full` layout: `yes` or `no`. Needs `--config` (profile membership isn't in the database). |
+| `report` | `include_profile` | Show the Profile column in the `full` layout: `yes` or `no`. Needs `--config` (profile membership isn't in the database). Ignored in PDF whenever the owner is already named elsewhere -- `--profile`'s report (named in the Patient header) or a `--multi-meter` section (named in its heading); only applies to a PDF spanning more than one owner with neither, or to CSV always. |
 | `report` | `include_summary` | Print a min/max/average/high-count/low-count summary line below the title: `yes` or `no`. PDF only. |
 | `report` | `include_sliding_scale` | Show Dose/Note columns, looked up per reading from a profile's `sliding_scale`: `yes` or `no`. Requires `--profile` (or resolves per section with `--multi-meter`) -- see [Reports](#reports) and its disclaimer. |
 | `alerting` | `enabled` | Notify via Apprise on threshold/staleness conditions: `yes` or `no`. Defaults to `no`. |

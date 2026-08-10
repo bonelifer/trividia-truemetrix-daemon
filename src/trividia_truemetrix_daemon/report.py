@@ -230,6 +230,7 @@ def _full_columns(
     report_config: ReportConfig,
     sliding_scale: tuple[SlidingScaleBand, ...] = (),
     include_device_model_columns: bool = True,
+    include_profile_column: bool = True,
 ) -> _FullColumns:
     """Build the header and raw values for whichever columns are enabled.
 
@@ -238,25 +239,29 @@ def _full_columns(
     dosing.py. This is a display lookup of a table the caller already
     configured, not a computed/generated recommendation.
 
-    include_device_model_columns is False for the PDF table (see
-    _build_full_table): with Dose/Note columns already in the mix,
-    per-row Device ID/Model pushed rows off the page edge, so PDF instead
-    shows meter identity once in the header (see _meter_summary_elements)
-    and report_config.include_device_id/include_model only govern CSV,
-    which has no page-width constraint.
+    include_device_model_columns and include_profile_column are False for
+    the PDF table (see _build_full_table): with Dose/Note columns already
+    in the mix, repeating a long device_id -- or a profile name already
+    named once in the header/section heading -- on every row pushed rows
+    off the page edge. PDF instead shows meter identity once in the header
+    (see _meter_summary_elements) and the owning profile once in the
+    Patient header or section heading; report_config.include_device_id/
+    include_model/include_profile only govern CSV, which has no
+    page-width constraint and no such header to fall back on.
     """
     unit_factor, unit_label = _UNIT_CONVERSIONS[report_config.unit]
     value_header = f"Glucose ({unit_label})"
     show_dose = report_config.include_sliding_scale and bool(sliding_scale)
     show_device_id = include_device_model_columns and report_config.include_device_id
     show_model = include_device_model_columns and report_config.include_model
+    show_profile = include_profile_column and report_config.include_profile
 
     header = ["Date/Time"]
     if show_device_id:
         header.append("Device ID")
     if show_model:
         header.append("Model")
-    if report_config.include_profile:
+    if show_profile:
         header.append("Profile")
     header.append(value_header)
     header.append("Flag")
@@ -271,7 +276,7 @@ def _full_columns(
             line.append(row.device_id)
         if show_model:
             line.append(row.model)
-        if report_config.include_profile:
+        if show_profile:
             line.append(row.profile)
         line.append(_format_value(row.value_mg_dl, unit_factor))
         line.append(row.out_of_range.upper() if row.out_of_range else "-")
@@ -288,12 +293,16 @@ def _build_full_table(
     rows: list[ReportRow],
     report_config: ReportConfig,
     sliding_scale: tuple[SlidingScaleBand, ...] = (),
+    include_profile_column: bool = True,
 ) -> Table:
-    columns = _full_columns(rows, report_config, sliding_scale, include_device_model_columns=False)
+    columns = _full_columns(
+        rows, report_config, sliding_scale,
+        include_device_model_columns=False, include_profile_column=include_profile_column,
+    )
     header = columns.header
     _, unit_label = _UNIT_CONVERSIONS[report_config.unit]
     value_idx = header.index(f"Glucose ({unit_label})")
-    profile_idx = header.index("Profile") if report_config.include_profile else None
+    profile_idx = header.index("Profile") if "Profile" in header else None
     dose_idx = header.index("Dose (units)") if "Dose (units)" in header else None
 
     data = [header]
@@ -544,7 +553,11 @@ def build_pdf(
     elif report_config.layout == "chart":
         elements.append(_build_chart(rows, report_config))
     else:
-        elements.append(_build_full_table(rows, report_config, sliding_scale))
+        elements.append(
+            _build_full_table(
+                rows, report_config, sliding_scale, include_profile_column=profile is None
+            )
+        )
 
     doc.build(elements)
 
@@ -616,7 +629,14 @@ def build_multi_meter_pdf(
         elif report_config.layout == "chart":
             elements.append(_build_chart(rows, report_config))
         else:
-            elements.append(_build_full_table(rows, report_config, section_sliding_scale))
+            # Every row in a section shares one device_id, so it shares one
+            # owning profile too -- already named in the section heading
+            # above, making a per-row Profile column redundant here too.
+            elements.append(
+                _build_full_table(
+                    rows, report_config, section_sliding_scale, include_profile_column=False
+                )
+            )
 
     doc.build(elements)
 

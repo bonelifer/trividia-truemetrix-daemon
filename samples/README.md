@@ -23,11 +23,13 @@ them show this header, in order:
 - A **Sliding Scale (Reference) table**: every configured band listed
   once, separate from the per-reading Dose/Note columns below.
 
-Device ID and Model deliberately live only in that header now, not as
-per-row table columns -- with Dose/Note columns already in the mix, a
-per-row Device ID (a long string) was pushing the table off the page edge.
-`report.include_device_id`/`include_model` still work, but only for
-`--format csv`, which has no page-width constraint forcing a choice.
+Device ID, Model, **and Profile** deliberately live only in that header
+now, not as per-row table columns in the `full` layout -- with Dose/Note
+columns already in the mix, repeating a long device_id (or a name already
+stated once in "Patient: ...") on every row was pushing the table off the
+page edge. `report.include_device_id`/`include_model`/`include_profile`
+still work, but only for `--format csv`, which has no page-width
+constraint (and no header to fall back on) forcing the same tradeoff.
 
 ## single/ -- layout x unit x date format (full layout)
 
@@ -38,10 +40,10 @@ per-row Device ID (a long string) was pushing the table off the page edge.
 | [full-mmol-world.pdf](single/full-mmol-world.pdf) | full | mmol/L | world |
 | [full-mmol-us.pdf](single/full-mmol-us.pdf) | full | mmol/L | us |
 
-The `full` layout is the only one with per-reading Dose/Note columns (and
-`include_profile`); all four samples above show every optional column
-(the default). The fixture includes one reading that falls in the "call
-doctor" band (301+) and one below range ("do not dose"), so both show up
+The `full` layout is the only one with per-reading Dose/Note columns; all
+four samples above show them (the default). The fixture includes one
+reading that falls in the "call doctor" band (301+) and one below range
+("do not dose"), so both show up
 in the per-reading columns here.
 
 ## single/ -- simple layout
