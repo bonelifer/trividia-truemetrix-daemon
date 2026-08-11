@@ -1,11 +1,13 @@
 """Poll for docked TRUE METRIX meters and sync their readings to storage.
 
-Unlike the BLE daemons in this family (always-on, scan-for-advertisement),
-a TRUE METRIX meter is a fingerstick device you dock occasionally over USB
-HID. There's no "connect and stream" here: each poll tick checks which
-matching HID devices are currently present (trividia_truemetrix_hid.discover)
-and syncs any that weren't already synced during this continuous dock --
-see PollLoop's docstring for the presence bookkeeping.
+A TRUE METRIX meter is a fingerstick device: there's no "connect and
+stream" here, over either transport this daemon supports. Each poll tick
+checks which matching HID devices are currently present
+(trividia_truemetrix_hid.discover) and syncs any that weren't already
+synced during this continuous dock -- see PollLoop's docstring for the
+presence bookkeeping. ble_sync.py's BleScanLoop is the direct-BLE
+equivalent (see that module's docstring for how its polling differs),
+run alongside this one when [ble] enabled = yes.
 """
 
 from __future__ import annotations

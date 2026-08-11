@@ -13,8 +13,10 @@ from ._version import __version__
 from .assignments import AssignmentStore
 from .config import (
     ApiConfig,
+    BleConfig,
     ConfigError,
     DEFAULT_API_CONFIG,
+    DEFAULT_BLE_CONFIG,
     DEFAULT_MQTT_CONFIG,
     DEFAULT_ONBOARDING_CONFIG,
     DEFAULT_PROFILES_CONFIG,
@@ -23,6 +25,7 @@ from .config import (
     ProfilesConfig,
     load_alert_config,
     load_api_config,
+    load_ble_config,
     load_config,
     load_mqtt_config,
     load_onboarding_config,
@@ -43,10 +46,17 @@ async def run_daemon(
     profiles_config: ProfilesConfig = DEFAULT_PROFILES_CONFIG,
     api_config: ApiConfig = DEFAULT_API_CONFIG,
     mqtt_config: MqttConfig = DEFAULT_MQTT_CONFIG,
+    ble_config: BleConfig = DEFAULT_BLE_CONFIG,
     once: bool = False,
     once_timeout: float = 60.0,
 ) -> bool:
-    """Run the poll loop until a stop signal (or, with once=True, one sync).
+    """Run the poll loop(s) until a stop signal (or, with once=True, one sync).
+
+    Runs the USB HID PollLoop always, plus a BLE BleScanLoop alongside it
+    when ble_config.enabled -- a meter can be synced over either
+    transport. ble_sync is only imported here, lazily, so a HID-only
+    install (no ``ble`` extra) never needs trividia_truemetrix_ble
+    installed unless BLE is actually turned on.
 
     Returns:
         True if at least one meter was synced. Always True for a normal
@@ -56,21 +66,37 @@ async def run_daemon(
     assignments = AssignmentStore(onboarding_config.assignments_path)
 
     _LOGGER.info(
-        "Starting trividia-truemetrix-daemon %s (config=%s%s)",
+        "Starting trividia-truemetrix-daemon %s (config=%s%s%s)",
         __version__,
         config_path,
         f", once, {once_timeout}s timeout" if once else "",
+        ", ble enabled" if ble_config.enabled else "",
     )
 
     try:
         async with mqtt_connection(mqtt_config) as mqtt_client:
-            loop = PollLoop(
+            hid_loop = PollLoop(
                 store, onboarding_config, profiles_config, assignments, api_config,
                 poll_interval_seconds, mqtt_client, mqtt_config,
             )
 
+            ble_loop = None
+            if ble_config.enabled:
+                from .ble_sync import BleScanLoop
+
+                ble_loop = BleScanLoop(
+                    store, onboarding_config, profiles_config, assignments, api_config,
+                    ble_config, mqtt_client, mqtt_config,
+                )
+
             if once:
-                synced = await loop.run_once(once_timeout)
+                if ble_loop is not None:
+                    hid_synced, ble_synced = await asyncio.gather(
+                        hid_loop.run_once(once_timeout), ble_loop.run_once(once_timeout)
+                    )
+                    synced = hid_synced or ble_synced
+                else:
+                    synced = await hid_loop.run_once(once_timeout)
                 if not synced:
                     _LOGGER.warning("No meter synced within %s seconds", once_timeout)
                 return synced
@@ -79,7 +105,11 @@ async def run_daemon(
             running_loop = asyncio.get_running_loop()
             for sig in (signal.SIGINT, signal.SIGTERM):
                 running_loop.add_signal_handler(sig, stop_event.set)
-            await loop.run(stop_event)
+
+            if ble_loop is not None:
+                await asyncio.gather(hid_loop.run(stop_event), ble_loop.run(stop_event))
+            else:
+                await hid_loop.run(stop_event)
             return True
     finally:
         store.close()
@@ -93,7 +123,7 @@ def _check_config(config_path: str) -> int:
 
     errors: list[str] = []
     daemon_config = onboarding_config = api_config = profiles_config = None
-    alert_config = mqtt_config = None
+    alert_config = mqtt_config = ble_config = None
 
     try:
         daemon_config = load_config(config_path)
@@ -119,6 +149,10 @@ def _check_config(config_path: str) -> int:
         mqtt_config = load_mqtt_config(config_path)
     except ConfigError as exc:
         errors.append(str(exc))
+    try:
+        ble_config = load_ble_config(config_path)
+    except ConfigError as exc:
+        errors.append(str(exc))
 
     if errors:
         print("Config errors:")
@@ -141,6 +175,16 @@ def _check_config(config_path: str) -> int:
         print("  note: api.enabled = no -- assignment prompts will use dunstify, not ntfy")
     print(f"  alerting.enabled = {alert_config.enabled}")
     print(f"  mqtt.enabled = {mqtt_config.enabled}")
+    print(f"  ble.enabled = {ble_config.enabled}")
+    if ble_config.enabled:
+        try:
+            import trividia_truemetrix_ble  # noqa: F401
+        except ImportError:
+            print(
+                "  error: ble.enabled = yes but trividia_truemetrix_ble isn't installed -- "
+                "run: pip install trividia-truemetrix-daemon[ble]"
+            )
+            return 1
     return 0
 
 
@@ -176,9 +220,20 @@ def main(argv: list[str] | None = None) -> None:
         onboarding_config = load_onboarding_config(args.config)
         api_config = load_api_config(args.config)
         mqtt_config = load_mqtt_config(args.config)
+        ble_config = load_ble_config(args.config)
     except ConfigError as exc:
         print(f"Error: {exc}")
         raise SystemExit(1) from exc
+
+    if ble_config.enabled:
+        try:
+            import trividia_truemetrix_ble  # noqa: F401
+        except ImportError:
+            print(
+                "Error: ble.enabled = yes but trividia_truemetrix_ble isn't installed -- "
+                "run: pip install trividia-truemetrix-daemon[ble]"
+            )
+            raise SystemExit(1)
 
     try:
         asyncio.run(
@@ -190,6 +245,7 @@ def main(argv: list[str] | None = None) -> None:
                 profiles_config,
                 api_config,
                 mqtt_config,
+                ble_config,
                 once=args.once,
                 once_timeout=args.once_timeout,
             )

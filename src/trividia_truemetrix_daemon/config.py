@@ -159,6 +159,39 @@ DEFAULT_ALERT_CONFIG = AlertConfig(
 
 
 @dataclass
+class BleConfig:
+    """Parsed ``[ble]`` section: optional direct-BLE sync for TRUE METRIX AIR.
+
+    Off by default. Requires the ``ble`` extra (``pip install
+    trividia-truemetrix-daemon[ble]``) -- see README. Runs alongside the
+    USB HID poll loop, not instead of it: a meter can be synced over
+    either transport, and both write to the same ReadingStore.
+
+    Unlike HID's near-instant ``discover()`` (called once per
+    poll_interval_seconds tick, cheap), a BLE scan takes real wall-clock
+    time -- scan_timeout_seconds per attempt, poll_interval_seconds
+    between attempts. silence_timeout_seconds is passed straight through
+    to trividia_truemetrix_ble's TrueMetrixBleClient: how long to wait
+    after the meter's last notification before concluding it's done
+    streaming (see that package's README for why -- the meter has no
+    real "done" signal).
+    """
+
+    enabled: bool
+    poll_interval_seconds: float
+    scan_timeout_seconds: float
+    silence_timeout_seconds: float
+
+
+DEFAULT_BLE_CONFIG = BleConfig(
+    enabled=False,
+    poll_interval_seconds=30.0,
+    scan_timeout_seconds=5.0,
+    silence_timeout_seconds=3.0,
+)
+
+
+@dataclass
 class MqttConfig:
     """Parsed ``[mqtt]`` section: optional MQTT publishing of synced readings."""
 
@@ -568,6 +601,57 @@ def load_alert_config(config_path: str) -> AlertConfig:
         stale_after_days=stale_after_days,
         state_path=alerting.get("state_path", DEFAULT_ALERT_CONFIG.state_path).strip()
         or DEFAULT_ALERT_CONFIG.state_path,
+    )
+
+
+def load_ble_config(config_path: str) -> BleConfig:
+    """Load the ``[ble]`` section, if present.
+
+    Raises:
+        ConfigError: If the file is missing or a numeric value is invalid.
+    """
+    parser = _read_parser(config_path)
+
+    if not parser.has_section("ble"):
+        return DEFAULT_BLE_CONFIG
+
+    ble = parser["ble"]
+    enabled = _parse_bool(ble.get("enabled", "no"), "ble.enabled")
+
+    try:
+        poll_interval_seconds = float(
+            ble.get("poll_interval_seconds", str(DEFAULT_BLE_CONFIG.poll_interval_seconds))
+        )
+    except ValueError as exc:
+        raise ConfigError("ble.poll_interval_seconds must be a number") from exc
+    if poll_interval_seconds <= 0:
+        raise ConfigError("ble.poll_interval_seconds must be positive")
+
+    try:
+        scan_timeout_seconds = float(
+            ble.get("scan_timeout_seconds", str(DEFAULT_BLE_CONFIG.scan_timeout_seconds))
+        )
+    except ValueError as exc:
+        raise ConfigError("ble.scan_timeout_seconds must be a number") from exc
+    if scan_timeout_seconds <= 0:
+        raise ConfigError("ble.scan_timeout_seconds must be positive")
+
+    try:
+        silence_timeout_seconds = float(
+            ble.get(
+                "silence_timeout_seconds", str(DEFAULT_BLE_CONFIG.silence_timeout_seconds)
+            )
+        )
+    except ValueError as exc:
+        raise ConfigError("ble.silence_timeout_seconds must be a number") from exc
+    if silence_timeout_seconds <= 0:
+        raise ConfigError("ble.silence_timeout_seconds must be positive")
+
+    return BleConfig(
+        enabled=enabled,
+        poll_interval_seconds=poll_interval_seconds,
+        scan_timeout_seconds=scan_timeout_seconds,
+        silence_timeout_seconds=silence_timeout_seconds,
     )
 
 

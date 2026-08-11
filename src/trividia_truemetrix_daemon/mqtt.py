@@ -72,7 +72,12 @@ async def publish_reading(
         mqtt_config: Supplies the topic prefix, QoS, and retain flag.
         device_id: The meter's device_id, used as the topic's last segment.
         model: Full model name, included in the payload.
-        reading: A trividia_truemetrix_hid.Reading.
+        reading: A trividia_truemetrix_hid.Reading (USB HID sync) or a
+            trividia_truemetrix_ble.Reading (BLE sync). The two aren't the
+            same type -- BLE's has no out_of_range (the standard Bluetooth
+            Glucose Profile doesn't expose the meter's own HI/LO clamping
+            the way the HID protocol does), hence getattr below rather
+            than a direct attribute access.
     """
     topic = f"{mqtt_config.topic_prefix}/{device_id}/state"
     payload = {
@@ -80,7 +85,7 @@ async def publish_reading(
         "model": model,
         "device_time": reading.device_time.isoformat(),
         "value_mg_dl": reading.value_mg_dl,
-        "out_of_range": reading.out_of_range,
+        "out_of_range": getattr(reading, "out_of_range", None),
     }
     try:
         await client.publish(

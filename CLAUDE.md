@@ -12,6 +12,35 @@
   for the upstream Tidepool source *it* tracks -- a protocol fix there
   flows through this one too, eventually.
 
+- **trividia-truemetrix-ble** --
+  https://github.com/bonelifer/trividia-truemetrix-ble -- this daemon's
+  optional direct-BLE protocol library for TRUE METRIX AIR, pulled as a
+  `git+https` dependency behind the `ble` extra (`pip install
+  trividia-truemetrix-daemon[ble]`), not installed by default. Same
+  upgrade caveat as trividia-truemetrix-hid above: a fix there needs
+  `pip install --upgrade "trividia-truemetrix-daemon[ble]"` to reach this
+  daemon. Wired up in `ble_sync.py` (`BleScanLoop`, mirroring
+  `sync.py`'s `PollLoop` shape but polling on its own interval, since a
+  BLE scan takes real wall-clock time unlike HID's near-instant
+  enumerate) and `cli.py`'s `run_daemon` (runs alongside the HID
+  `PollLoop` via `asyncio.gather` when `[ble] enabled = yes`). Two
+  integration points worth knowing about if touching this code: (1)
+  `mqtt.publish_reading` uses `getattr(reading, "out_of_range", None)`
+  rather than a direct attribute access, since a
+  `trividia_truemetrix_ble.Reading` has no `out_of_range` field (the
+  standard Bluetooth Glucose Profile doesn't expose the meter's own
+  HI/LO clamping the way the HID protocol does) -- storage.py's schema
+  already had this column nullable, so no migration was needed; (2)
+  `BleScanLoop._tick` and `sync_ble_device` both catch broad `Exception`,
+  not just `TrueMetrixError` -- a real BLE scan/connection failure (no
+  D-Bus, adapter off, permission denied, device moved out of range) can
+  raise all sorts of exceptions from bleak/dbus-fast that aren't this
+  package's own error type, and an unhandled one here would propagate
+  through `asyncio.gather` and take down the sibling HID loop too, not
+  just the BLE path. Confirmed this concretely, not just reasoned about
+  it: an early version crashed exactly this way in a container with no
+  D-Bus socket at all, before both catches were broadened.
+
 - **etekcity-scale-daemon** -- local checkout at `../etekcity-scale-daemon`,
   https://github.com/bonelifer/etekcity-scale-daemon -- the architecture
   template this daemon's conventions were deliberately mirrored from
@@ -32,10 +61,21 @@
 
 ## Verification status
 
-Sync/report/alerting/MQTT/API logic is unit-tested (116 tests as of this
-writing), and the Docker image is CI-verified end to end (real `docker
-build` + `docker run`, not just "`pip install .` succeeds" -- see
-`.github/workflows/ci.yml`). The one thing none of that touches: the
-actual USB HID hardware path -- docking a real TRUE METRIX AIR and
-syncing readings through this daemon -- which no CI runner can exercise
-and hasn't been tested yet.
+Sync/report/alerting/MQTT/API/BLE logic is unit-tested (129 tests as of
+this writing, `.[dev,ble]` installed in CI so the BLE path is actually
+covered, not skipped), and the Docker image is CI-verified end to end
+(real `docker build` + `docker run`, not just "`pip install .`
+succeeds" -- see `.github/workflows/ci.yml`). What none of that touches:
+real hardware, over either transport. Docking a real TRUE METRIX AIR and
+syncing over USB HID, and connecting to one over BLE and syncing through
+`BleScanLoop`, are both unverified -- no CI runner can exercise either.
+The BLE *protocol* itself (byte format, GATT behavior) has real-hardware
+verification already, done in `trividia-truemetrix-ble`'s own repo, not
+this daemon's -- this daemon's BLE *wiring* on top of that (device_id
+synthesis, storage, MQTT, onboarding) is what's still unconfirmed
+end-to-end.
+
+Docker is USB HID only -- the `ble` extra isn't in the default image, and
+reaching a host's Bluetooth adapter from inside a container needs its
+own passthrough setup this project doesn't provide yet. See the
+README's Docker section.
