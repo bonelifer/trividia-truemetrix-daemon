@@ -29,6 +29,9 @@ trividia-truemetrix-alert-check = "trividia_truemetrix_daemon.alerting:main"
 trividia-truemetrix-prune = "trividia_truemetrix_daemon.prune:main"
 
 [project.optional-dependencies]
+ble = [
+    "trividia-truemetrix-ble @ git+https://github.com/bonelifer/trividia-truemetrix-ble.git",
+]
 dev = [
     "flake8>=7.0.0",
     "pytest>=8.0.0",

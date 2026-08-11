@@ -1,12 +1,16 @@
 # trividia-truemetrix-daemon
 
 A standalone Linux daemon that syncs a Trividia Health TRUE METRIX blood
-glucose meter's stored readings to a local SQLite database over USB HID. No
-cloud account, no companion app, no Tidepool account required.
+glucose meter's stored readings to a local SQLite database over USB HID or,
+optionally, Bluetooth LE. No cloud account, no companion app, no Tidepool
+account required.
 
-It's a thin wrapper around the
+It's a thin wrapper around
 [`trividia-truemetrix-hid`](https://github.com/bonelifer/trividia-truemetrix-hid)
-library, packaged to run unattended as a `systemd` service.
+(the primary, always-available USB HID transport) and, when enabled,
+[`trividia-truemetrix-ble`](https://github.com/bonelifer/trividia-truemetrix-ble)
+(direct BLE for TRUE METRIX AIR, no docking station needed), packaged to
+run unattended as a `systemd` service.
 
 **Disclaimer: This is an unofficial, community-developed project. It is not
 affiliated with, officially maintained by, or in any way officially
@@ -22,10 +26,15 @@ tool does not generate, validate, or recommend doses.**
 
 ## Supported meters
 
-Whatever [`trividia-truemetrix-hid`](https://github.com/bonelifer/trividia-truemetrix-hid)
-supports: TRUE METRIX, TRUE METRIX GO, and TRUE METRIX AIR. Only TRUE
+Over USB HID: whatever
+[`trividia-truemetrix-hid`](https://github.com/bonelifer/trividia-truemetrix-hid)
+supports -- TRUE METRIX, TRUE METRIX GO, and TRUE METRIX AIR. Only TRUE
 METRIX AIR has real-hardware testing at time of writing -- see that
 library's README for the current verification status.
+
+Over Bluetooth LE (optional, see [below](#bluetooth-le-optional)): TRUE
+METRIX AIR only, via
+[`trividia-truemetrix-ble`](https://github.com/bonelifer/trividia-truemetrix-ble).
 
 ## Features
 
@@ -33,6 +42,9 @@ library's README for the current verification status.
   local SQLite database, deduplicated so re-docking the same meter is
   always safe (the meter returns its *entire* history every sync, not just
   new readings -- see [Database schema](#database-schema)).
+- Optional direct-BLE sync for TRUE METRIX AIR, running alongside the USB
+  HID poll loop -- no docking station needed. Same dedupe guarantee, same
+  database. See [Bluetooth LE](#bluetooth-le-optional).
 - **Multi-meter, per-person attribution.** Unlike a shared BLE scale, each
   meter has its own serial number, so `[profile.<name>]` sections bind a
   person to their own meter(s) by `device_id` -- no runtime "who was this?"
@@ -77,6 +89,10 @@ SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1f41", GROUP="plugdev", MODE="0660"
 sudo udevadm control --reload-rules && sudo udevadm trigger
 ```
 
+USB HID is the only hard requirement -- Bluetooth LE support is optional
+and off by default; see [Bluetooth LE](#bluetooth-le-optional) for its
+own separate requirements.
+
 ## Installation
 
 ```bash
@@ -116,6 +132,10 @@ sudo "$EDITOR" /etc/trividia-truemetrix-daemon/config.ini
 | `profile.<name>` | `sliding_scale` | Optional dosing table, one band per line: `low:high:dose[:label]` (`low`/`high` blank = unbounded on that side). See [Reports](#reports) -- **this must come from the person's own doctor; this tool never invents, validates, or adjusts these numbers.** Overlapping bands are rejected at load (an ambiguous table is a safety issue). |
 | `profile.<name>` | `high_threshold_mg_dl` / `low_threshold_mg_dl` | Optional, overrides `[alerting]`'s global thresholds for this profile's meter(s). Blank = use the global default. See [Alerting](#alerting). |
 | `profile.<name>` | `tir_low_mg_dl` / `tir_high_mg_dl` | Optional, overrides `[report]`'s global Time in Range target band for this profile's meter(s). Blank = use the global default (70-180 mg/dL). See [Reports](#reports). |
+| `ble` | `enabled` | Run the BLE scan loop alongside USB HID: `yes` or `no`. Defaults to `no`. Requires the `ble` extra -- see [Bluetooth LE](#bluetooth-le-optional). |
+| `ble` | `poll_interval_seconds` | Seconds between BLE scan attempts. Defaults to `30` -- separate from `daemon.poll_interval_seconds` since a BLE scan takes real time, unlike HID's near-instant check. |
+| `ble` | `scan_timeout_seconds` | Seconds each individual scan attempt lasts. Defaults to `5`. |
+| `ble` | `silence_timeout_seconds` | Seconds of no new notification before concluding the meter finished streaming its history. Defaults to `3`. See `trividia-truemetrix-ble`'s README for why this is a heuristic, not a hard signal. |
 | `onboarding` | `enabled` | Fire the new-device onboarding notification: `yes` or `no`. Defaults to `no`. |
 | `onboarding` | `ntfy_url` / `ntfy_token` | ntfy topic for the interactive assignment prompt. Requires `[api] enabled = yes`. |
 | `onboarding` | `api_base_url` | Where the API is reachable, for ntfy's action buttons to call back into. Only used when `[api]` is enabled. |
@@ -169,6 +189,55 @@ Watch it with:
 ```bash
 sudo journalctl -u trividia-truemetrix-daemon -f
 ```
+
+## Bluetooth LE (optional)
+
+TRUE METRIX AIR can also sync directly over Bluetooth LE, no docking
+station needed, running alongside the USB HID poll loop rather than
+replacing it -- a meter can be synced over either transport, and both
+write to the same database. Off by default.
+
+Requires the `ble` extra:
+
+```bash
+/opt/trividia-truemetrix-daemon/venv/bin/pip install "trividia-truemetrix-daemon[ble]"
+```
+
+(or `pip install ".[ble]"` from a source checkout). This pulls in
+[`trividia-truemetrix-ble`](https://github.com/bonelifer/trividia-truemetrix-ble),
+which depends on [`bleak`](https://pypi.org/project/bleak/) -- on Linux,
+that means BlueZ and D-Bus, already present on most desktop/server
+installs but not inside the project's default Docker image (see
+[Docker](#docker)). Non-root BLE access on Linux typically needs the
+running user in the `bluetooth` group, same spirit as HID's `plugdev`
+requirement above.
+
+Then turn it on in the config:
+
+```ini
+[ble]
+enabled = yes
+```
+
+`--check-config` catches the common misconfiguration -- `ble.enabled =
+yes` without the extra installed -- and fails clearly instead of the
+daemon crashing partway through startup. See the config table above for
+`poll_interval_seconds`/`scan_timeout_seconds`/`silence_timeout_seconds`.
+
+A BLE-synced meter's `device_id` is `Trividia-BLE-<serial>` (or
+`Trividia-BLE-<address>` if the meter doesn't expose a serial number over
+BLE) -- a different shape from USB HID's `Trividia-<model_code>-<serial>`,
+since BLE's standard Device Information Service has no equivalent short
+model code to build from. The same physical meter therefore gets two
+different `device_id`s depending on which transport synced it; add both
+to a profile's `device_ids` if you use both transports with the same
+meter (see the `profile.<name>` rows in the config table above --
+"Bob" already shows the multi-`device_id` pattern for a replaced meter,
+same idea applies here).
+
+**Not yet verified against real hardware** -- the underlying protocol
+itself has been (see `trividia-truemetrix-ble`'s own README for how), but
+this daemon's BLE wiring hasn't been exercised against a real meter yet.
 
 ## Onboarding new devices
 
@@ -393,6 +462,17 @@ is docked. `docker-compose.yml` uses `privileged: true` plus a full
 broader access than strictly necessary. If your meter's hidraw node is
 stable on your system, replace both with a scoped
 `devices: ["/dev/hidraw0:/dev/hidraw0"]` instead.
+
+The default image and `docker-compose.yml` are USB HID only -- the `ble`
+extra (see [Bluetooth LE](#bluetooth-le-optional)) isn't installed in the
+`Dockerfile`, and even with it added, reaching a host's Bluetooth adapter
+from inside a container needs its own passthrough (typically the D-Bus
+system socket bind-mounted in, plus `network_mode: host` or explicit
+Bluetooth device access) that this project doesn't set up yet. Setting
+`[ble] enabled = yes` inside this container as shipped degrades the same
+way it would on any host with no D-Bus reachable: logged scan-failure
+warnings, not a crash, but no BLE sync either -- see BleScanLoop's
+exception handling in `ble_sync.py` if debugging this.
 
 A pre-built image publishes to GHCR from CI on every push to `main`,
 tagged `latest` and by commit SHA, so `docker pull

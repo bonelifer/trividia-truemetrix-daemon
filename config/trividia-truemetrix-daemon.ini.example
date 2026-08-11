@@ -53,6 +53,25 @@ db_path = /var/lib/trividia-truemetrix-daemon/readings.db
 # device_ids = Trividia-BLU-87654321, Trividia-MR2-11223344
 # # No threshold overrides -- Bob uses [alerting]'s global defaults below.
 
+# Direct-BLE sync for TRUE METRIX AIR, alongside the USB HID poll loop
+# above -- a meter can be synced over either transport, both write to the
+# same database. Off by default; requires the "ble" extra (pip install
+# trividia-truemetrix-daemon[ble]) -- see README.
+[ble]
+enabled = no
+
+# A BLE scan takes real time (unlike HID's near-instant check), so this
+# runs on its own interval rather than sharing poll_interval_seconds above.
+poll_interval_seconds = 30
+
+# How long each individual scan attempt lasts.
+scan_timeout_seconds = 5
+
+# How long to wait after the meter's last notification before concluding
+# it's done streaming its history -- the meter has no real "done" signal
+# over BLE. See trividia-truemetrix-ble's README for why.
+silence_timeout_seconds = 3
+
 # Threshold/staleness alerting, checked periodically (e.g. by the bundled
 # systemd timer, hourly by default) rather than by the daemon itself. A
 # high/low alert fires once per newly-arrived reading that crosses the

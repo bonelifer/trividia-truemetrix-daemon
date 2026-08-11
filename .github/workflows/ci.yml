@@ -19,7 +19,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install --no-install-recommends -y libhidapi-hidraw0
 
       - name: Install dev dependencies
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev,ble]"
 
       - name: Lint
         run: flake8 --config .flake8 src tests

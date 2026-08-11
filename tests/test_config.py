@@ -6,6 +6,7 @@ from trividia_truemetrix_daemon.config import (
     ConfigError,
     load_alert_config,
     load_api_config,
+    load_ble_config,
     load_config,
     load_mqtt_config,
     load_onboarding_config,
@@ -284,6 +285,49 @@ def test_load_alert_config_rejects_negative_threshold(tmp_path):
     path = _write(tmp_path, "[alerting]\nhigh_threshold_mg_dl = -5\n")
     with pytest.raises(ConfigError, match="zero or positive"):
         load_alert_config(path)
+
+
+def test_load_ble_config_defaults_to_disabled(tmp_path):
+    path = _write(tmp_path, "[storage]\ndb_path = /tmp/x.db\n")
+    config = load_ble_config(path)
+    assert config.enabled is False
+    assert config.poll_interval_seconds == 30.0
+    assert config.scan_timeout_seconds == 5.0
+    assert config.silence_timeout_seconds == 3.0
+
+
+def test_load_ble_config_parses_values(tmp_path):
+    path = _write(
+        tmp_path,
+        "[ble]\n"
+        "enabled = yes\n"
+        "poll_interval_seconds = 15\n"
+        "scan_timeout_seconds = 10\n"
+        "silence_timeout_seconds = 2\n",
+    )
+    config = load_ble_config(path)
+    assert config.enabled is True
+    assert config.poll_interval_seconds == 15
+    assert config.scan_timeout_seconds == 10
+    assert config.silence_timeout_seconds == 2
+
+
+def test_load_ble_config_rejects_non_positive_poll_interval(tmp_path):
+    path = _write(tmp_path, "[ble]\nenabled = yes\npoll_interval_seconds = 0\n")
+    with pytest.raises(ConfigError, match="poll_interval_seconds"):
+        load_ble_config(path)
+
+
+def test_load_ble_config_rejects_non_positive_scan_timeout(tmp_path):
+    path = _write(tmp_path, "[ble]\nenabled = yes\nscan_timeout_seconds = -1\n")
+    with pytest.raises(ConfigError, match="scan_timeout_seconds"):
+        load_ble_config(path)
+
+
+def test_load_ble_config_rejects_non_positive_silence_timeout(tmp_path):
+    path = _write(tmp_path, "[ble]\nenabled = yes\nsilence_timeout_seconds = 0\n")
+    with pytest.raises(ConfigError, match="silence_timeout_seconds"):
+        load_ble_config(path)
 
 
 def test_load_mqtt_config_defaults_to_disabled(tmp_path):
