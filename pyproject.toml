@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "trividia-truemetrix-daemon"
 version = "0.1.0"
-description = "Standalone USB HID daemon that syncs Trividia TRUE METRIX glucose readings to SQLite"
+description = "Standalone daemon that syncs Trividia TRUE METRIX glucose readings to SQLite over USB HID or Bluetooth LE"
 readme = "README.md"
 license = "GPL-3.0-only"
 requires-python = ">=3.11"
