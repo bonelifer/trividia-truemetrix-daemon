@@ -258,10 +258,11 @@ DEFAULT_ONBOARDING_CONFIG = OnboardingConfig(
 
 @dataclass
 class ApiConfig:
-    """Parsed ``[api]`` section: local HTTP server for the ntfy assignment callback.
+    """Parsed ``[api]`` section: local HTTP server for readings, reports, and
+    the ntfy assignment callback.
 
-    Deliberately minimal (``/health`` and ``/assign-device`` only) -- there's
-    no ``/latest`` or ``/report`` yet, unlike etekcity-scale-daemon's API.
+    All routes are versioned under ``/api/v1/`` -- see api.py's ``build_app``
+    for the full list (health, capabilities, latest, report, assign-device).
     """
 
     enabled: bool

@@ -45,7 +45,7 @@ async def notify_via_ntfy(
     policy -- a brief outage at exactly the wrong moment shouldn't mean the
     device can only ever be assigned via --find-unassigned/the API directly.
     """
-    callback_base = f"{onboarding_config.api_base_url}/assign-device"
+    callback_base = f"{onboarding_config.api_base_url}/api/v1/assign-device"
     headers = {}
     if onboarding_config.ntfy_token:
         headers["Authorization"] = f"Bearer {onboarding_config.ntfy_token}"
