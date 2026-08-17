@@ -144,16 +144,17 @@ admin_apprise_urls =
 state_path = /var/lib/trividia-truemetrix-daemon/onboarding-state.json
 assignments_path = /var/lib/trividia-truemetrix-daemon/device-assignments.json
 
-# Local read-only HTTP API (/health, /latest, /report) plus the ntfy
-# assignment callback (/assign-device). host defaults to loopback-only --
-# see the README's HTTP API section before binding this anywhere else.
+# Local read-only HTTP API (/api/v1/health, /api/v1/capabilities,
+# /api/v1/latest, /api/v1/report) plus the ntfy assignment callback
+# (/api/v1/assign-device). host defaults to loopback-only -- see the
+# README's HTTP API section before binding this anywhere else.
 [api]
 enabled = no
 host = 127.0.0.1
 port = 8080
 token =
 
-# trividia-truemetrix-report / the API's /report endpoint. See the README's
+# trividia-truemetrix-report / the API's /api/v1/report endpoint. See the README's
 # Reports section for the full option list (layout, page_size, sliding
 # scale, etc.) -- this section only shows the two Time in Range defaults,
 # since those are the one report setting worth a sensible global default

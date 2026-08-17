@@ -1,9 +1,9 @@
 """Local HTTP API: latest readings, on-demand reports, and the ntfy assignment callback.
 
 Reads from the same SQLite database as everything else in this package --
-it's a standalone read-only view onto that data (plus /assign-device's one
-write), not part of the daemon's sync loop, so it works whether or not the
-daemon is currently running.
+it's a standalone read-only view onto that data (plus /api/v1/assign-device's
+one write), not part of the daemon's sync loop, so it works whether or not
+the daemon is currently running.
 """
 
 from __future__ import annotations
@@ -20,11 +20,13 @@ from .assignments import AssignmentStore, resolve_profile
 from .config import (
     ApiConfig,
     ConfigError,
+    MqttConfig,
     ProfilesConfig,
     ReportConfig,
     load_alert_config,
     load_api_config,
     load_config,
+    load_mqtt_config,
     load_onboarding_config,
     load_profiles_config,
     load_report_config,
@@ -42,6 +44,9 @@ from .storage import ensure_schema
 
 _VALID_FORMATS = ("pdf", "csv")
 _VALID_PERIODS = ("7d", "30d", "90d", "1y", "all")
+
+_API_VERSION = "v1"
+_API_PREFIX = f"/api/{_API_VERSION}"
 
 
 def _latest_readings(
@@ -113,12 +118,57 @@ def _require_auth(request: web.Request) -> web.Response | None:
 
 
 async def handle_health(request: web.Request) -> web.Response:
-    """GET /health -- unauthenticated liveness check."""
+    """GET /api/v1/health -- unauthenticated liveness check."""
     return web.json_response({"status": "ok", "version": __version__})
 
 
+def _capabilities(mqtt_config: MqttConfig | None) -> dict[str, object]:
+    """Build the JSON body for GET /api/v1/capabilities from live config/state.
+
+    Args:
+        mqtt_config: The daemon's parsed ``[mqtt]`` section, or None if it
+            couldn't be loaded (reported as simply disabled in that case).
+
+    Returns:
+        A dict describing what this daemon is and how its data is shaped,
+        so a client (e.g. a Health Hub aggregator) can introspect it without
+        hardcoding daemon-specific assumptions.
+    """
+    if mqtt_config is not None and mqtt_config.enabled:
+        mqtt: dict[str, object] = {
+            "enabled": True,
+            "topic_pattern": f"{mqtt_config.topic_prefix}/<device_id>/state",
+        }
+    else:
+        mqtt = {"enabled": False}
+
+    return {
+        "daemon": "trividia-truemetrix",
+        "api_version": _API_VERSION,
+        "measurement_types": ["glucose"],
+        "measurement_modes": ["spot"],
+        "profile_model": "assignable",
+        "timestamp_fields": {
+            "device_time": (
+                "The meter's own clock at the time of the reading -- closest "
+                "equivalent to \"measured at\"."
+            ),
+            "synced_at": (
+                "When the daemon ingested the reading -- closest equivalent "
+                "to \"received at\"."
+            ),
+        },
+        "mqtt": mqtt,
+    }
+
+
+async def handle_capabilities(request: web.Request) -> web.Response:
+    """GET /api/v1/capabilities -- unauthenticated description of what this daemon exposes."""
+    return web.json_response(_capabilities(request.app.get("mqtt_config")))
+
+
 async def handle_latest(request: web.Request) -> web.Response:
-    """GET /latest[?device_id=...&profile=...] -- most recent reading per meter, as JSON."""
+    """GET /api/v1/latest[?device_id=...&profile=...] -- most recent reading per meter, as JSON."""
     unauthorized = _require_auth(request)
     if unauthorized is not None:
         return unauthorized
@@ -136,7 +186,7 @@ async def handle_latest(request: web.Request) -> web.Response:
 
 
 async def handle_assign_device(request: web.Request) -> web.Response:
-    """GET/POST /assign-device?device_id=...&profile=... -- bind a meter to a profile.
+    """GET/POST /api/v1/assign-device?device_id=...&profile=... -- bind a meter to a profile.
 
     Accepts GET too, since ntfy's http action type is simplest to configure
     as a bare URL hit rather than a POST with a body.
@@ -160,7 +210,7 @@ async def handle_assign_device(request: web.Request) -> web.Response:
 
 
 async def handle_report(request: web.Request) -> web.Response:
-    """GET /report -- format/period/from/to/device_id/profile/multi_meter query params.
+    """GET /api/v1/report -- format/period/from/to/device_id/profile/multi_meter query params.
 
     Generates a report on demand using the same config-driven settings as
     trividia-truemetrix-report and returns it as a file download.
@@ -264,6 +314,7 @@ def build_app(
     api_config: ApiConfig,
     profiles_config: ProfilesConfig,
     report_config: ReportConfig,
+    mqtt_config: MqttConfig | None = None,
 ) -> web.Application:
     app = web.Application()
     app["db_path"] = db_path
@@ -272,11 +323,13 @@ def build_app(
     app["profile_names"] = list(profiles_config.profiles.keys())
     app["profiles_config"] = profiles_config
     app["report_config"] = report_config
-    app.router.add_get("/health", handle_health)
-    app.router.add_get("/latest", handle_latest)
-    app.router.add_get("/report", handle_report)
-    app.router.add_get("/assign-device", handle_assign_device)
-    app.router.add_post("/assign-device", handle_assign_device)
+    app["mqtt_config"] = mqtt_config
+    app.router.add_get(f"{_API_PREFIX}/health", handle_health)
+    app.router.add_get(f"{_API_PREFIX}/capabilities", handle_capabilities)
+    app.router.add_get(f"{_API_PREFIX}/latest", handle_latest)
+    app.router.add_get(f"{_API_PREFIX}/report", handle_report)
+    app.router.add_get(f"{_API_PREFIX}/assign-device", handle_assign_device)
+    app.router.add_post(f"{_API_PREFIX}/assign-device", handle_assign_device)
     return app
 
 
@@ -302,6 +355,7 @@ def main(argv: list[str] | None = None) -> int:
         onboarding_config = load_onboarding_config(args.config)
         profiles_config = load_profiles_config(args.config)
         report_config = load_report_config(args.config)
+        mqtt_config = load_mqtt_config(args.config)
         # Loaded (and thus validated) even though unused here, so a config
         # error in [alerting] is caught at API startup too.
         load_alert_config(args.config)
@@ -315,7 +369,7 @@ def main(argv: list[str] | None = None) -> int:
 
     ensure_schema(db_path)
     assignments = AssignmentStore(onboarding_config.assignments_path)
-    app = build_app(db_path, assignments, api_config, profiles_config, report_config)
+    app = build_app(db_path, assignments, api_config, profiles_config, report_config, mqtt_config)
     print(f"Listening on http://{api_config.host}:{api_config.port}")
     web.run_app(app, host=api_config.host, port=api_config.port, print=None)
     return 0

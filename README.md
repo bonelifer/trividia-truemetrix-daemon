@@ -63,7 +63,7 @@ METRIX AIR only, via
 - `trividia-truemetrix-alert-check` notifies via
   [Apprise](https://github.com/caronc/apprise) on high/low glucose
   thresholds or a meter going stale -- see [Alerting](#alerting).
-- A local, read-only HTTP API (`/latest`, on-demand `/report`) for fetching
+- A local, read-only HTTP API (`/api/v1/latest`, on-demand `/api/v1/report`) for fetching
   data without shelling in -- see [HTTP API](#http-api).
 - Optional MQTT publishing of each newly-synced reading, as JSON -- see
   [MQTT](#mqtt).
@@ -144,7 +144,7 @@ sudo "$EDITOR" /etc/trividia-truemetrix-daemon/config.ini
 | `onboarding` | `state_path` | Where "already prompted" state is tracked (once per device_id, ever). |
 | `onboarding` | `assignments_path` | Where dynamic (button-tap) device_id -> profile assignments are stored, separate from the static config. |
 | `api` | `enabled` | Run the local HTTP API: `yes` or `no`. See [HTTP API](#http-api); also needed for the ntfy assignment callback. |
-| `api` | `host` / `port` / `token` | Bind address/port, and an optional bearer token required on every endpoint except `/health`. |
+| `api` | `host` / `port` / `token` | Bind address/port, and an optional bearer token required on every endpoint except `/api/v1/health` and `/api/v1/capabilities`. |
 | `report` | `unit` | `mg_dl` or `mmol_l`. Defaults to `mg_dl` (what the meter itself always reports). |
 | `report` | `date_format` | `us` (MM/DD/YYYY, 12-hour) or `world` (DD/MM/YYYY, 24-hour). |
 | `report` | `layout` | `full` (one row per reading), `simple` (date/glucose only, side-by-side columns), or `chart` (a line chart of glucose over time). PDF only. |
@@ -276,7 +276,7 @@ sudo systemctl enable --now trividia-truemetrix-api.service
 Manually assign (or correct) a device without waiting for a notification:
 
 ```bash
-curl "http://127.0.0.1:8080/assign-device?device_id=Trividia-BLU-12345678&profile=Alice"
+curl "http://127.0.0.1:8080/api/v1/assign-device?device_id=Trividia-BLU-12345678&profile=Alice"
 ```
 
 ### Finding unassigned devices
@@ -363,25 +363,52 @@ Endpoints:
 
 | Method & path | Description |
 |---|---|
-| `GET /health` | Unauthenticated liveness check: `{"status": "ok", "version": "..."}`. |
-| `GET /latest[?device_id=...&profile=...]` | Most recent reading for each meter (or one, if filtered), as JSON, with `profile` resolved the same way the daemon itself resolves it. |
-| `GET /report[?format=pdf\|csv&period=...&from=...&to=...&device_id=...&profile=...&multi_meter=1]` | Generates a report on demand using the same `[report]` config as `trividia-truemetrix-report`, returned as a file download. `multi_meter=1` is the query-string equivalent of `--multi-meter`; `report.include_sliding_scale = yes` still requires `?profile=` (or resolves per section under `multi_meter=1`), same as the CLI. |
-| `GET`/`POST /assign-device?device_id=...&profile=...` | Bind a meter to a profile -- see [Onboarding new devices](#onboarding-new-devices). |
+| `GET /api/v1/health` | Unauthenticated liveness check: `{"status": "ok", "version": "..."}`. |
+| `GET /api/v1/capabilities` | Unauthenticated description of what this daemon exposes (measurement types, profile model, timestamp fields, MQTT topic pattern) -- see [Capabilities](#capabilities). |
+| `GET /api/v1/latest[?device_id=...&profile=...]` | Most recent reading for each meter (or one, if filtered), as JSON, with `profile` resolved the same way the daemon itself resolves it. |
+| `GET /api/v1/report[?format=pdf\|csv&period=...&from=...&to=...&device_id=...&profile=...&multi_meter=1]` | Generates a report on demand using the same `[report]` config as `trividia-truemetrix-report`, returned as a file download. `multi_meter=1` is the query-string equivalent of `--multi-meter`; `report.include_sliding_scale = yes` still requires `?profile=` (or resolves per section under `multi_meter=1`), same as the CLI. |
+| `GET`/`POST /api/v1/assign-device?device_id=...&profile=...` | Bind a meter to a profile -- see [Onboarding new devices](#onboarding-new-devices). |
 
 ```bash
-curl http://127.0.0.1:8080/latest
-curl -o report.pdf "http://127.0.0.1:8080/report?profile=Alice&period=30d"
+curl http://127.0.0.1:8080/api/v1/latest
+curl -o report.pdf "http://127.0.0.1:8080/api/v1/report?profile=Alice&period=30d"
 ```
 
 **There's no TLS built in.** `host` defaults to `127.0.0.1` (loopback only)
 for a reason: don't bind it to `0.0.0.0` or a LAN-facing interface without
 putting a reverse proxy (with TLS and its own auth) in front of it.
 Setting `api.token` requires an `Authorization: Bearer <token>` header on
-every endpoint except `/health`, which is worth doing even on loopback if
-other local users/processes on the same host shouldn't see glucose data:
+every endpoint except `/api/v1/health` and `/api/v1/capabilities`, which is
+worth doing even on loopback if other local users/processes on the same
+host shouldn't see glucose data:
 
 ```bash
-curl -H "Authorization: Bearer <token>" http://127.0.0.1:8080/latest
+curl -H "Authorization: Bearer <token>" http://127.0.0.1:8080/api/v1/latest
+```
+
+### Capabilities
+
+`GET /api/v1/capabilities` describes what this daemon exposes, for a
+client (e.g. a Health Hub aggregator) to introspect without hardcoding
+daemon-specific assumptions:
+
+```bash
+curl http://127.0.0.1:8080/api/v1/capabilities
+```
+
+```json
+{
+  "daemon": "trividia-truemetrix",
+  "api_version": "v1",
+  "measurement_types": ["glucose"],
+  "measurement_modes": ["spot"],
+  "profile_model": "assignable",
+  "timestamp_fields": {
+    "device_time": "The meter's own clock at the time of the reading -- closest equivalent to \"measured at\".",
+    "synced_at": "When the daemon ingested the reading -- closest equivalent to \"received at\"."
+  },
+  "mqtt": {"enabled": false}
+}
 ```
 
 ## MQTT

@@ -16,7 +16,7 @@ body:
       description: Which part of the daemon is this about?
       options:
         - Sync daemon (trividia-truemetrix-daemon)
-        - Onboarding / assignment (ntfy, dunstify, /assign-device)
+        - Onboarding / assignment (ntfy, dunstify, /api/v1/assign-device)
         - Alerting (trividia-truemetrix-alert-check)
         - Reports (trividia-truemetrix-report)
         - HTTP API (trividia-truemetrix-api)
