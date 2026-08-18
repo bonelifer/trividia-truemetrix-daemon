@@ -10,7 +10,7 @@ readme = "README.md"
 license = "GPL-3.0-only"
 requires-python = ">=3.11"
 dependencies = [
-    "trividia-truemetrix-hid @ git+https://github.com/bonelifer/trividia-truemetrix-hid.git",
+    "trividia-truemetrix-hid @ git+https://github.com/home-health-hub/trividia-truemetrix-hid.git",
     "apprise>=1.0.0,<2.0.0",
     "aiohttp>=3.9.0,<4.0.0",
     "reportlab>=4.0.0,<5.0.0",
@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/bonelifer/trividia-truemetrix-daemon"
+Homepage = "https://github.com/home-health-hub/trividia-truemetrix-daemon"
 
 [project.scripts]
 trividia-truemetrix-daemon = "trividia_truemetrix_daemon.cli:main"
@@ -30,7 +30,7 @@ trividia-truemetrix-prune = "trividia_truemetrix_daemon.prune:main"
 
 [project.optional-dependencies]
 ble = [
-    "trividia-truemetrix-ble @ git+https://github.com/bonelifer/trividia-truemetrix-ble.git",
+    "trividia-truemetrix-ble @ git+https://github.com/home-health-hub/trividia-truemetrix-ble.git",
 ]
 dev = [
     "flake8>=7.0.0",

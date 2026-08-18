@@ -6,9 +6,9 @@ optionally, Bluetooth LE. No cloud account, no companion app, no Tidepool
 account required.
 
 It's a thin wrapper around
-[`trividia-truemetrix-hid`](https://github.com/bonelifer/trividia-truemetrix-hid)
+[`trividia-truemetrix-hid`](https://github.com/home-health-hub/trividia-truemetrix-hid)
 (the primary, always-available USB HID transport) and, when enabled,
-[`trividia-truemetrix-ble`](https://github.com/bonelifer/trividia-truemetrix-ble)
+[`trividia-truemetrix-ble`](https://github.com/home-health-hub/trividia-truemetrix-ble)
 (direct BLE for TRUE METRIX AIR, no docking station needed), packaged to
 run unattended as a `systemd` service.
 
@@ -27,14 +27,14 @@ tool does not generate, validate, or recommend doses.**
 ## Supported meters
 
 Over USB HID: whatever
-[`trividia-truemetrix-hid`](https://github.com/bonelifer/trividia-truemetrix-hid)
+[`trividia-truemetrix-hid`](https://github.com/home-health-hub/trividia-truemetrix-hid)
 supports -- TRUE METRIX, TRUE METRIX GO, and TRUE METRIX AIR. Only TRUE
 METRIX AIR has real-hardware testing at time of writing -- see that
 library's README for the current verification status.
 
 Over Bluetooth LE (optional, see [below](#bluetooth-le-optional)): TRUE
 METRIX AIR only, via
-[`trividia-truemetrix-ble`](https://github.com/bonelifer/trividia-truemetrix-ble).
+[`trividia-truemetrix-ble`](https://github.com/home-health-hub/trividia-truemetrix-ble).
 
 ## Features
 
@@ -74,7 +74,7 @@ METRIX AIR only, via
 ## Requirements
 
 Requires Python 3.11+, and everything
-[`trividia-truemetrix-hid`](https://github.com/bonelifer/trividia-truemetrix-hid#requirements)
+[`trividia-truemetrix-hid`](https://github.com/home-health-hub/trividia-truemetrix-hid#requirements)
 does: the `hidapi` system library, and (on Linux) a udev rule for non-root
 USB HID access. The daemon runs as its own system user in the `plugdev`
 group, so use `GROUP="plugdev"` rather than the library README's
@@ -96,7 +96,7 @@ own separate requirements.
 ## Installation
 
 ```bash
-git clone https://github.com/bonelifer/trividia-truemetrix-daemon.git
+git clone https://github.com/home-health-hub/trividia-truemetrix-daemon.git
 cd trividia-truemetrix-daemon
 sudo ./install.sh
 ```
@@ -204,7 +204,7 @@ Requires the `ble` extra:
 ```
 
 (or `pip install ".[ble]"` from a source checkout). This pulls in
-[`trividia-truemetrix-ble`](https://github.com/bonelifer/trividia-truemetrix-ble),
+[`trividia-truemetrix-ble`](https://github.com/home-health-hub/trividia-truemetrix-ble),
 which depends on [`bleak`](https://pypi.org/project/bleak/) -- on Linux,
 that means BlueZ and D-Bus, already present on most desktop/server
 installs but not inside the project's default Docker image (see
@@ -503,7 +503,7 @@ exception handling in `ble_sync.py` if debugging this.
 
 A pre-built image publishes to GHCR from CI on every push to `main`,
 tagged `latest` and by commit SHA, so `docker pull
-ghcr.io/bonelifer/trividia-truemetrix-daemon:latest` works instead of
+ghcr.io/home-health-hub/trividia-truemetrix-daemon:latest` works instead of
 building locally, if you'd rather not build it yourself. Substitute that
 image name for `trividia-truemetrix-daemon` in the commands below to use
 it instead of `docker build`.
@@ -697,20 +697,20 @@ Query it directly with `sqlite3`, or point any BI/graphing tool at the file.
 
 - Meter hardware designed and sold by [Trividia Health](https://www.trividiahealth.com)
   (see the Disclaimer above).
-- Built on [`trividia-truemetrix-hid`](https://github.com/bonelifer/trividia-truemetrix-hid),
+- Built on [`trividia-truemetrix-hid`](https://github.com/home-health-hub/trividia-truemetrix-hid),
   which does the USB HID protocol work, itself ported from Tidepool's
   open-source uploader driver.
 - Daemon structure (config/storage/systemd/install.sh conventions, and the
   ntfy/dunstify notification pattern) follows
-  [`etekcity-scale-daemon`](https://github.com/bonelifer/etekcity-scale-daemon).
+  [`etekcity-scale-daemon`](https://github.com/home-health-hub/etekcity-scale-daemon).
 - Code review, implementation, and documentation assisted by [Claude](https://www.anthropic.com/claude).
 
 ## Contributing
 
 Contributions are welcome!
 
-- **Bug reports**: [Open an issue](https://github.com/bonelifer/trividia-truemetrix-daemon/issues).
-- **Everything else** (questions, feature requests, ideas, general discussion): [Use Discussions](https://github.com/bonelifer/trividia-truemetrix-daemon/discussions).
+- **Bug reports**: [Open an issue](https://github.com/home-health-hub/trividia-truemetrix-daemon/issues).
+- **Everything else** (questions, feature requests, ideas, general discussion): [Use Discussions](https://github.com/home-health-hub/trividia-truemetrix-daemon/discussions).
 - Pull requests are welcome for bug fixes or discussed features.
 
 ## License
