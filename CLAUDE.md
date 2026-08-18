@@ -3,7 +3,7 @@
 ## Related repos to watch
 
 - **trividia-truemetrix-hid** --
-  https://github.com/bonelifer/trividia-truemetrix-hid -- this daemon's
+  https://github.com/home-health-hub/trividia-truemetrix-hid -- this daemon's
   own USB HID protocol library, pulled as a `git+https` dependency in
   `pyproject.toml` (not a versioned PyPI release). A fix or feature added
   there doesn't reach this daemon automatically: it needs
@@ -13,7 +13,7 @@
   flows through this one too, eventually.
 
 - **trividia-truemetrix-ble** --
-  https://github.com/bonelifer/trividia-truemetrix-ble -- this daemon's
+  https://github.com/home-health-hub/trividia-truemetrix-ble -- this daemon's
   optional direct-BLE protocol library for TRUE METRIX AIR, pulled as a
   `git+https` dependency behind the `ble` extra (`pip install
   trividia-truemetrix-daemon[ble]`), not installed by default. Same
@@ -42,7 +42,7 @@
   D-Bus socket at all, before both catches were broadened.
 
 - **etekcity-scale-daemon** -- local checkout at `../etekcity-scale-daemon`,
-  https://github.com/bonelifer/etekcity-scale-daemon -- the architecture
+  https://github.com/home-health-hub/etekcity-scale-daemon -- the architecture
   template this daemon's conventions were deliberately mirrored from
   (config/storage/alerting/MQTT/pruning/Docker/CI patterns, notification
   throttling shapes, etc.). Not a code dependency, just a design
