@@ -1,5 +1,7 @@
 # trividia-truemetrix-daemon
 
+![trividia-truemetrix-daemon: glucose readings over Bluetooth or USB to a local home server and database](docs/images/trividia-truemetrix-daemon-banner.png)
+
 A standalone Linux daemon that syncs a Trividia Health TRUE METRIX blood
 glucose meter's stored readings to a local SQLite database over USB HID or,
 optionally, Bluetooth LE. No cloud account, no companion app, no Tidepool
