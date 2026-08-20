@@ -7,8 +7,7 @@
   own USB HID protocol library, pulled as a `git+https` dependency in
   `pyproject.toml` (not a versioned PyPI release). A fix or feature added
   there doesn't reach this daemon automatically: it needs
-  `pip install --upgrade` (or a fresh `docker build`, which always
-  re-clones at build time) to pick it up. See that repo's own `CLAUDE.md`
+  `pip install --upgrade` to pick it up. See that repo's own `CLAUDE.md`
   for the upstream Tidepool source *it* tracks -- a protocol fix there
   flows through this one too, eventually.
 
@@ -44,7 +43,7 @@
 - **etekcity-scale-daemon** -- local checkout at `../etekcity-scale-daemon`,
   https://github.com/home-health-hub/etekcity-scale-daemon -- the architecture
   template this daemon's conventions were deliberately mirrored from
-  (config/storage/alerting/MQTT/pruning/Docker/CI patterns, notification
+  (config/storage/alerting/MQTT/pruning/CI patterns, notification
   throttling shapes, etc.). Not a code dependency, just a design
   reference: if that project adopts a new pattern worth borrowing, or
   fixes a bug in a pattern this daemon copied verbatim, it's worth
@@ -63,19 +62,13 @@
 
 Sync/report/alerting/MQTT/API/BLE logic is unit-tested (129 tests as of
 this writing, `.[dev,ble]` installed in CI so the BLE path is actually
-covered, not skipped), and the Docker image is CI-verified end to end
-(real `docker build` + `docker run`, not just "`pip install .`
-succeeds" -- see `.github/workflows/ci.yml`). What none of that touches:
-real hardware, over either transport. Docking a real TRUE METRIX AIR and
-syncing over USB HID, and connecting to one over BLE and syncing through
+covered, not skipped) -- see `.github/workflows/ci.yml`. What none of
+that touches: real hardware, over either transport. Docking a real TRUE
+METRIX AIR and syncing over USB HID, and connecting to one over BLE and
+syncing through
 `BleScanLoop`, are both unverified -- no CI runner can exercise either.
 The BLE *protocol* itself (byte format, GATT behavior) has real-hardware
 verification already, done in `trividia-truemetrix-ble`'s own repo, not
 this daemon's -- this daemon's BLE *wiring* on top of that (device_id
 synthesis, storage, MQTT, onboarding) is what's still unconfirmed
 end-to-end.
-
-Docker is USB HID only -- the `ble` extra isn't in the default image, and
-reaching a host's Bluetooth adapter from inside a container needs its
-own passthrough setup this project doesn't provide yet. See the
-README's Docker section.

@@ -75,7 +75,6 @@ METRIX AIR only, via
   [MQTT](#mqtt).
 - `trividia-truemetrix-prune` manually deletes readings older than a given
   number of days -- see [Pruning old data](#pruning-old-data).
-- A Docker image, CI-built and published to GHCR -- see [Docker](#docker).
 
 ## Requirements
 
@@ -213,8 +212,7 @@ Requires the `ble` extra:
 [`trividia-truemetrix-ble`](https://github.com/home-health-hub/trividia-truemetrix-ble),
 which depends on [`bleak`](https://pypi.org/project/bleak/) -- on Linux,
 that means BlueZ and D-Bus, already present on most desktop/server
-installs but not inside the project's default Docker image (see
-[Docker](#docker)). Non-root BLE access on Linux typically needs the
+installs. Non-root BLE access on Linux typically needs the
 running user in the `bluetooth` group, same spirit as HID's `plugdev`
 requirement above.
 
@@ -474,72 +472,6 @@ Add `--device-id Trividia-BLU-12345678` to restrict pruning to one meter.
 config file. Pruning is keyed on `device_time` (the meter's own clock),
 matching what reports and alerting already use -- see [Database
 schema](#database-schema).
-
-## Docker
-
-CI actually builds and runs this image (`docker build`, then `--version`
-on every console script, `--check-config`, and a real report generation,
-all inside the container) on every push, so those specific things are
-verified, not just "`pip install .` succeeds." **What CI can't verify is
-the USB HID hardware path** -- there's no meter attached to a GitHub
-Actions runner, so actually docking a meter and syncing through
-`docker-compose`'s device passthrough remains unconfirmed until tested
-against real hardware. Treat the container mechanics as working, and the
-hardware path as a starting point to debug.
-
-USB HID access from inside a container needs the meter's `/dev/hidrawN`
-node, which -- unlike a BLE daemon's one stable D-Bus/adapter path -- is
-assigned dynamically per USB enumeration and only exists while the meter
-is docked. `docker-compose.yml` uses `privileged: true` plus a full
-`/dev:/dev` bind mount as the simplest reliable option for that; it's
-broader access than strictly necessary. If your meter's hidraw node is
-stable on your system, replace both with a scoped
-`devices: ["/dev/hidraw0:/dev/hidraw0"]` instead.
-
-The default image and `docker-compose.yml` are USB HID only -- the `ble`
-extra (see [Bluetooth LE](#bluetooth-le-optional)) isn't installed in the
-`Dockerfile`, and even with it added, reaching a host's Bluetooth adapter
-from inside a container needs its own passthrough (typically the D-Bus
-system socket bind-mounted in, plus `network_mode: host` or explicit
-Bluetooth device access) that this project doesn't set up yet. Setting
-`[ble] enabled = yes` inside this container as shipped degrades the same
-way it would on any host with no D-Bus reachable: logged scan-failure
-warnings, not a crash, but no BLE sync either -- see BleScanLoop's
-exception handling in `ble_sync.py` if debugging this.
-
-A pre-built image publishes to GHCR from CI on every push to `main`,
-tagged `latest` and by commit SHA, so `docker pull
-ghcr.io/home-health-hub/trividia-truemetrix-daemon:latest` works instead of
-building locally, if you'd rather not build it yourself. Substitute that
-image name for `trividia-truemetrix-daemon` in the commands below to use
-it instead of `docker build`.
-
-```bash
-mkdir -p config data
-cp config/trividia-truemetrix-daemon.ini.example config/config.ini
-"$EDITOR" config/config.ini   # set storage.db_path = /var/lib/trividia-truemetrix-daemon/readings.db
-docker compose up -d --build
-docker compose logs -f
-```
-
-Run any of the other console scripts inside the running container:
-
-```bash
-docker compose exec trividia-truemetrix-daemon trividia-truemetrix-report --config /etc/trividia-truemetrix-daemon/config.ini --output /var/lib/trividia-truemetrix-daemon/report.pdf
-```
-
-Without Compose, the equivalent is:
-
-```bash
-docker build -t trividia-truemetrix-daemon .
-docker run -d --name trividia-truemetrix-daemon \
-  --privileged \
-  -v /dev:/dev \
-  -v "$(pwd)/config:/etc/trividia-truemetrix-daemon" \
-  -v "$(pwd)/data:/var/lib/trividia-truemetrix-daemon" \
-  --restart unless-stopped \
-  trividia-truemetrix-daemon
-```
 
 ## Manual usage
 
